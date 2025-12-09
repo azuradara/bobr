@@ -28,10 +28,11 @@ type OriginConfig struct {
 }
 
 type HostConfig struct {
-	Bustable  bool           `yaml:"bustable"`
-	Transform bool           `yaml:"transform"`
-	Optimize  bool           `yaml:"optimize"`
-	Origins   []OriginConfig `yaml:"origins"`
+	Bustable         bool           `yaml:"bustable"`
+	Transform        bool           `yaml:"transform"`
+	TransformPresets map[string]int `yaml:"transform_presets"`
+	Optimize         bool           `yaml:"optimize"`
+	Origins          []OriginConfig `yaml:"origins"`
 }
 
 type Config struct {

@@ -34,6 +34,12 @@ type hostRouter struct {
 	origins []config.OriginConfig
 }
 
+type requestContext struct {
+	cacheKey        string
+	transformParams transform.Params
+	effectivePath   string
+}
+
 func NewHandler(c *cache.Cache, hosts map[string]config.HostConfig) *Handler {
 	h := &Handler{
 		cache:       c,
@@ -83,9 +89,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cacheKey, transformParams := h.getCacheKey(r, router.config)
+	reqCtx, err := h.resolveRequest(r, router.config)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
 
-	if data, size, contentType, err := h.cache.Get(cacheKey); err == nil {
+		return
+	}
+
+	if data, size, contentType, err := h.cache.Get(reqCtx.cacheKey); err == nil {
 		h.serveCacheHit(w, data, size, contentType)
 
 		return
@@ -93,7 +104,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("cache error", "err", err)
 	}
 
-	h.handleCacheMiss(w, r, router, cacheKey, transformParams)
+	h.handleCacheMiss(w, r, router, reqCtx)
 }
 
 func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) bool {
@@ -125,29 +136,42 @@ func (h *Handler) getHostRouter(w http.ResponseWriter, r *http.Request) (*hostRo
 	return router, true
 }
 
-func (h *Handler) getCacheKey(
+func (h *Handler) resolveRequest(
 	r *http.Request,
 	hostCfg config.HostConfig,
-) (string, transform.Params) {
+) (requestContext, error) {
 	path := r.URL.Path
-	cacheKey := r.Host + path
+	ctx := requestContext{
+		effectivePath: path,
+		cacheKey:      r.Host + path,
+	}
 
-	var transformParams transform.Params
-
-	if hostCfg.Transform {
-		transformParams = transform.ParseParams(r.URL.Query())
-		cacheKey += transformParams.CacheKey()
+	if len(hostCfg.TransformPresets) > 0 {
+		//nolint:staticcheck // legacy feature
+		if orig, width, ok := transform.ParsePreset(path, hostCfg.TransformPresets); ok {
+			ctx.transformParams = transform.Params{Width: width}
+			ctx.effectivePath = orig
+			ctx.cacheKey = r.Host + ctx.effectivePath + ctx.transformParams.CacheKey()
+		} else {
+			//nolint:staticcheck // legacy feature
+			if transform.IsPresetCandidate(path) {
+				return requestContext{}, errors.New("invalid preset")
+			}
+		}
+	} else if hostCfg.Transform {
+		ctx.transformParams = transform.ParseParams(r.URL.Query())
+		ctx.cacheKey += ctx.transformParams.CacheKey()
 	}
 
 	if hostCfg.Optimize {
-		cacheKey += "_opt"
+		ctx.cacheKey += "_opt"
 	}
 
-	if hostCfg.Bustable && r.URL.RawQuery != "" && transformParams.Empty() {
-		cacheKey += "?" + r.URL.RawQuery
+	if hostCfg.Bustable && r.URL.RawQuery != "" && ctx.transformParams.Empty() {
+		ctx.cacheKey += "?" + r.URL.RawQuery
 	}
 
-	return cacheKey, transformParams
+	return ctx, nil
 }
 
 func (h *Handler) serveCacheHit(
@@ -173,23 +197,21 @@ func (h *Handler) handleCacheMiss(
 	w http.ResponseWriter,
 	r *http.Request,
 	router *hostRouter,
-	cacheKey string,
-	transformParams transform.Params,
+	reqCtx requestContext,
 ) {
-	origins := h.selectOrigins(router, r.URL.Path)
+	origins := h.selectOrigins(router, reqCtx.effectivePath)
 	if len(origins) == 0 {
 		http.Error(w, "Not Found", http.StatusNotFound)
 
 		return
 	}
 
-	path := r.URL.Path
 	hostCfg := router.config
 
 	for i, originCfg := range origins {
-		originPath := path
+		originPath := reqCtx.effectivePath
 		if originCfg.Prefix != "" && originCfg.Prefix != "/" {
-			originPath = strings.TrimPrefix(path, originCfg.Prefix)
+			originPath = strings.TrimPrefix(reqCtx.effectivePath, originCfg.Prefix)
 			if !strings.HasPrefix(originPath, "/") {
 				originPath = "/" + originPath
 			}
@@ -243,12 +265,12 @@ func (h *Handler) handleCacheMiss(
 
 		dataBytes, contentType, size := h.processContent(
 			hostCfg,
-			transformParams,
+			reqCtx.transformParams,
 			dataBytes,
 			contentType,
 		)
 
-		h.asyncCache(cacheKey, dataBytes, contentType)
+		h.asyncCache(reqCtx.cacheKey, dataBytes, contentType)
 		h.serveResponse(w, dataBytes, size, contentType)
 
 		return

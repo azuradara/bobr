@@ -13,6 +13,10 @@ hosts:
   _default:
     optimize: true
     transform: true
+    transform_presets:
+      sm: 108
+      md: 453
+      lg: 680
 
     origins:
       - name: bobr
