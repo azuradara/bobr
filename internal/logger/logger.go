@@ -27,7 +27,7 @@ func Init(cfg config.LoggerConfig) error {
 		slog.NewJSONHandler(
 			os.Stdout,
 			&slog.HandlerOptions{
-				AddSource: true,
+				AddSource: false,
 				Level:     slevel,
 			},
 		),

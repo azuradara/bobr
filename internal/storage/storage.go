@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
+
+var ErrNotFound = errors.New("not found")
 
 type Driver interface {
 	Fetch(ctx context.Context, path string) (io.ReadCloser, int64, string, error)
@@ -53,6 +56,12 @@ func (s *S3Driver) Fetch(ctx context.Context, path string) (io.ReadCloser, int64
 
 	stat, err := obj.Stat()
 	if err != nil {
+		var errResp minio.ErrorResponse
+		if errors.As(err, &errResp) {
+			if errResp.Code == "NoSuchKey" {
+				return nil, 0, "", ErrNotFound
+			}
+		}
 		return nil, 0, "", err
 	}
 

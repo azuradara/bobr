@@ -171,6 +171,13 @@ func (h *Handler) handleCacheMiss(
 
 	body, _, contentType, err := driver.Fetch(r.Context(), path)
 	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			slog.Debug("origin object not found", "path", path)
+			http.Error(w, "Not Found", http.StatusNotFound)
+
+			return
+		}
+
 		slog.Error("origin fetch failed", "err", err, "path", path)
 		http.Error(w, "Not Found", http.StatusNotFound)
 
