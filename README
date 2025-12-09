@@ -1,4 +1,4 @@
-bobr - multi-origin content delivery edge with transforms and optimizations
+bóbr - multi-origin content delivery edge with transforms and optimizations
 
 DEPENDENCIES
   - Go 1.25+
