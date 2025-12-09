@@ -17,7 +17,11 @@ func TestParseParams(t *testing.T) {
 		{"width only", "width=100", Params{Width: 100}},
 		{"height only", "height=200", Params{Height: 200}},
 		{"both", "width=100&height=200", Params{Width: 100, Height: 200}},
-		{"crop center", "width=100&height=100&crop=center", Params{Width: 100, Height: 100, Crop: CropCenter}},
+		{
+			"crop center",
+			"width=100&height=100&crop=center",
+			Params{Width: 100, Height: 100, Crop: CropCenter},
+		},
 		{"crop top", "crop=top", Params{Crop: CropTop}},
 		{"crop bottom", "crop=BOTTOM", Params{Crop: CropBottom}},
 		{"crop left", "crop=left", Params{Crop: CropLeft}},

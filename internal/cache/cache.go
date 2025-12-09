@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +51,7 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 	if err := os.MkdirAll(cfg.DbDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create cache db dir: %w", err)
 	}
+
 	db, err := leveldb.OpenFile(cfg.DbDir, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open leveldb: %w", err)
@@ -58,6 +60,7 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 	maxSize, err := humanize.ParseBytes(cfg.MaxSize)
 	if err != nil {
 		_ = db.Close()
+
 		return nil, fmt.Errorf("invalid max_size: %w", err)
 	}
 
@@ -78,10 +81,12 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 		iter := db.NewIterator(util.BytesPrefix([]byte("entry:")), nil)
 		for iter.Next() {
 			var meta Metadata
-			if err := json.Unmarshal(iter.Value(), &meta); err == nil {
+			err := json.Unmarshal(iter.Value(), &meta)
+			if err == nil {
 				c.curSize += meta.Size
 			}
 		}
+
 		iter.Release()
 	}
 
@@ -89,7 +94,7 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 }
 
 func (c *Cache) saveSize(batch *leveldb.Batch) {
-	batch.Put([]byte("sys:size"), []byte(fmt.Sprintf("%d", c.curSize)))
+	batch.Put([]byte("sys:size"), []byte(strconv.FormatInt(c.curSize, 10)))
 }
 
 func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
@@ -99,16 +104,20 @@ func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
 	metaBytes, err := c.disk.Get(keyToEntryKey(key), nil)
 	if err != nil {
 		c.mu.Unlock()
-		if err == leveldb.ErrNotFound {
+
+		if errors.Is(err, leveldb.ErrNotFound) {
 			atomic.AddInt64(&c.Misses, 1)
+
 			return nil, 0, "", ErrNotFound
 		}
+
 		return nil, 0, "", err
 	}
 
 	var meta Metadata
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
 		c.mu.Unlock()
+
 		return nil, 0, "", err
 	}
 
@@ -116,24 +125,31 @@ func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
 	c.mu.Unlock()
 
 	blobPath := c.getBlobPath(key)
+
 	f, err := os.Open(blobPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			go c.cleanupStaleEntry(key, meta.Size)
+
 			atomic.AddInt64(&c.Misses, 1)
+
 			return nil, 0, "", ErrNotFound
 		}
+
 		return nil, 0, "", err
 	}
 
 	atomic.AddInt64(&c.Hits, 1)
+
 	return f, meta.Size, meta.ContentType, nil
 }
 
 func (c *Cache) cleanupStaleEntry(key string, size int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	_ = c.disk.Delete(keyToEntryKey(key), nil)
+
 	c.curSize -= size
 	if c.curSize < 0 {
 		c.curSize = 0
@@ -143,12 +159,15 @@ func (c *Cache) cleanupStaleEntry(key string, size int64) {
 func (c *Cache) Set(key string, value []byte, contentType string) error {
 	size := int64(len(value))
 	if size > c.maxSize {
-		return fmt.Errorf("object too large")
+		return errors.New("object too large")
 	}
 
 	c.mu.Lock()
+
 	exists := false
+
 	var oldSize int64
+
 	if val, err := c.disk.Get(keyToEntryKey(key), nil); err == nil {
 		var meta Metadata
 		if json.Unmarshal(val, &meta) == nil {
@@ -161,9 +180,12 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 		victimKey, _, ok := c.getLRUVictim()
 		if ok {
 			candidateFreq := c.sketch.Estimate(key)
+
 			victimFreq := c.sketch.Estimate(victimKey)
+
 			if candidateFreq < victimFreq {
 				c.mu.Unlock()
+
 				return nil
 			}
 		}
@@ -179,10 +201,14 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 		if !ok {
 			break
 		}
-		if err := c.deleteMeta(vKey, vMeta); err != nil {
+
+		err := c.deleteMeta(vKey, vMeta)
+		if err != nil {
 			c.mu.Unlock()
+
 			return err
 		}
+
 		victims = append(victims, struct {
 			key  string
 			meta Metadata
@@ -199,16 +225,21 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 	}()
 
 	blobPath := c.getBlobPath(key)
-	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
+	err := os.MkdirAll(filepath.Dir(blobPath), 0o755)
+	if err != nil {
 		c.mu.Lock()
 		c.curSize -= (size - oldSize)
 		c.mu.Unlock()
+
 		return err
 	}
-	if err := os.WriteFile(blobPath, value, 0o644); err != nil {
+
+	err = os.WriteFile(blobPath, value, 0o644)
+	if err != nil {
 		c.mu.Lock()
 		c.curSize -= (size - oldSize)
 		c.mu.Unlock()
+
 		return err
 	}
 
@@ -229,10 +260,13 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 
 	c.saveSize(batch)
 
-	if err := c.disk.Write(batch, nil); err != nil {
+	err = c.disk.Write(batch, nil)
+	if err != nil {
 		return err
 	}
+
 	c.sketch.Add(key)
+
 	return nil
 }
 
@@ -259,6 +293,7 @@ func (c *Cache) Close() error {
 func (c *Cache) getBlobPath(key string) string {
 	hash := sha256.Sum256([]byte(key))
 	hashStr := hex.EncodeToString(hash[:])
+
 	return filepath.Join(c.blobDir, hashStr[:2], hashStr[2:4], hashStr)
 }
 
@@ -292,6 +327,7 @@ func (c *Cache) getLRUVictim() (string, Metadata, bool) {
 		key := string(iter.Value())
 		if key == "" {
 			var ts int64
+
 			f, _ := fmt.Sscanf(string(iter.Key()), "access:%d:%s", &ts, &key)
 			if f < 2 {
 				return "", Metadata{}, false
@@ -302,9 +338,13 @@ func (c *Cache) getLRUVictim() (string, Metadata, bool) {
 		if err != nil {
 			return "", Metadata{}, false
 		}
+
 		var meta Metadata
+
 		_ = json.Unmarshal(metaBytes, &meta)
+
 		return key, meta, true
 	}
+
 	return "", Metadata{}, false
 }

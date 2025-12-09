@@ -19,6 +19,7 @@ func NewSketch(width, depth int) *CountMinSketch {
 	for i := range table {
 		table[i] = make([]uint32, width)
 	}
+
 	return &CountMinSketch{
 		width: width,
 		depth: depth,
@@ -34,7 +35,7 @@ func (s *CountMinSketch) Add(key string) {
 	}
 
 	h := fnvHash(key)
-	for i := 0; i < s.depth; i++ {
+	for i := range s.depth {
 		idx := (h + uint64(i)*12345) % uint64(s.width)
 		s.table[i][idx]++
 	}
@@ -42,19 +43,21 @@ func (s *CountMinSketch) Add(key string) {
 
 func (s *CountMinSketch) Estimate(key string) uint32 {
 	min := ^uint32(0)
+
 	h := fnvHash(key)
-	for i := 0; i < s.depth; i++ {
+	for i := range s.depth {
 		idx := (h + uint64(i)*12345) % uint64(s.width)
 		if s.table[i][idx] < min {
 			min = s.table[i][idx]
 		}
 	}
+
 	return min
 }
 
 func (s *CountMinSketch) Reset() {
-	for i := 0; i < s.depth; i++ {
-		for j := 0; j < s.width; j++ {
+	for i := range s.depth {
+		for j := range s.width {
 			s.table[i][j] /= 2
 		}
 	}

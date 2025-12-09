@@ -91,6 +91,7 @@ func IsImage(contentType string) bool {
 
 func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 	img := bimg.NewImage(data)
+
 	size, err := img.Size()
 	if err != nil {
 		return nil, "", err
@@ -186,6 +187,7 @@ func fitDimensions(origW, origH, targetW, targetH int) (int, int) {
 		if aspectRatio > targetAspect {
 			return targetW, int(float64(targetW) / aspectRatio)
 		}
+
 		return int(float64(targetH) * aspectRatio), targetH
 	}
 

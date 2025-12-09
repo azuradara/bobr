@@ -13,6 +13,7 @@ import (
 
 func TestCache_Stats(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-stats")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -22,6 +23,7 @@ func TestCache_Stats(t *testing.T) {
 	}
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	_, _, _, err = c.Get("miss")
@@ -30,6 +32,7 @@ func TestCache_Stats(t *testing.T) {
 	_ = c.Set("hit", []byte("val"), "")
 	data, _, _, err := c.Get("hit")
 	assert.NoError(t, err)
+
 	_ = data.Close()
 
 	stats := c.Stats()
@@ -40,6 +43,7 @@ func TestCache_Stats(t *testing.T) {
 
 func TestCache_Sharding(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-sharding")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -50,6 +54,7 @@ func TestCache_Sharding(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	key := "my-key"
@@ -60,17 +65,21 @@ func TestCache_Sharding(t *testing.T) {
 	assert.NoError(t, err)
 
 	foundDir := false
+
 	for _, e := range entries {
 		if e.IsDir() && len(e.Name()) == 2 {
 			foundDir = true
+
 			break
 		}
 	}
+
 	assert.True(t, foundDir, "Should find sharded directory")
 }
 
 func TestCache_Basic(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-basic")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -81,6 +90,7 @@ func TestCache_Basic(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	err = c.Set("key1", []byte("value1"), "")
@@ -88,8 +98,10 @@ func TestCache_Basic(t *testing.T) {
 
 	data, _, _, err := c.Get("key1")
 	assert.NoError(t, err)
+
 	val, _ := io.ReadAll(data)
 	_ = data.Close()
+
 	assert.Equal(t, []byte("value1"), val)
 
 	_, _, _, err = c.Get("unknown")
@@ -98,6 +110,7 @@ func TestCache_Basic(t *testing.T) {
 
 func TestCache_LRU(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-lru")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -108,11 +121,12 @@ func TestCache_LRU(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	val := []byte("12345678901234567890")
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		err := c.Set(fmt.Sprintf("key%d", i), val, "")
 		assert.NoError(t, err)
 		time.Sleep(1 * time.Millisecond)
@@ -122,10 +136,12 @@ func TestCache_LRU(t *testing.T) {
 	if data != nil {
 		_ = data.Close()
 	}
+
 	assert.NoError(t, err)
 
 	data, _, _, err = c.Get("key0")
 	assert.NoError(t, err)
+
 	_ = data.Close()
 
 	bigVal := []byte("123456789012345678901234567890")
@@ -155,11 +171,13 @@ func TestCache_LRU(t *testing.T) {
 
 	data, _, _, err = c.Get("key0")
 	assert.NoError(t, err)
+
 	_ = data.Close()
 }
 
 func TestCache_TinyLFU_Admission(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-lfu")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -170,18 +188,20 @@ func TestCache_TinyLFU_Admission(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	val := []byte("1234567890")
 
 	_ = c.Set("frequent", val, "")
-	for i := 0; i < 10; i++ {
+
+	for range 10 {
 		if data, _, _, _ := c.Get("frequent"); data != nil {
 			_ = data.Close()
 		}
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_ = c.Set(fmt.Sprintf("junk%d", i), val, "")
 	}
 
@@ -191,6 +211,7 @@ func TestCache_TinyLFU_Admission(t *testing.T) {
 
 func TestCache_Persistence(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-cache-persist")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := config.CacheConfig{
@@ -201,17 +222,21 @@ func TestCache_Persistence(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
+
 	_ = c.Set("persist", []byte("data"), "")
 	_ = c.Close()
 
 	c2, err := New(cfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c2.Close() }()
 
 	data, _, _, err := c2.Get("persist")
 	assert.NoError(t, err)
+
 	val, _ := io.ReadAll(data)
 	_ = data.Close()
+
 	assert.Equal(t, []byte("data"), val)
 
 	assert.Equal(t, int64(4), c2.curSize)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"log/slog"
@@ -41,7 +42,8 @@ func main() {
 	srv := server.New(cfg, c, cfg.Hosts)
 
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server failed", slog.Any("error", err))
 			os.Exit(1)
 		}
@@ -54,6 +56,7 @@ func main() {
 	<-stop
 
 	slog.Info("shutting down")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

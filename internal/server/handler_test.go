@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 func TestHandler_CORS(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-handler-test")
+
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cacheCfg := config.CacheConfig{
@@ -22,12 +24,13 @@ func TestHandler_CORS(t *testing.T) {
 
 	c, err := cache.New(cacheCfg)
 	assert.NoError(t, err)
+
 	defer func() { _ = c.Close() }()
 
 	hosts := map[string]config.HostConfig{}
 	h := NewHandler(c, hosts)
 
-	req := httptest.NewRequest("OPTIONS", "http://example.com/test", nil)
+	req := httptest.NewRequest(http.MethodOptions, "http://example.com/test", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
