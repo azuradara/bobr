@@ -62,6 +62,7 @@ func (s *S3Driver) Fetch(ctx context.Context, path string) (io.ReadCloser, int64
 				return nil, 0, "", ErrNotFound
 			}
 		}
+
 		return nil, 0, "", err
 	}
 

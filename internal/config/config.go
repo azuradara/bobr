@@ -1,7 +1,10 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +23,7 @@ type CacheConfig struct {
 type OriginConfig struct {
 	Name   string            `yaml:"name"`
 	Type   string            `yaml:"type"`
+	Prefix string            `yaml:"prefix"`
 	Config map[string]string `yaml:"config"`
 }
 
@@ -48,5 +52,39 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+func (c *Config) Validate() error {
+	for host, hostCfg := range c.Hosts {
+		hasRoot := false
+		hasPrefix := false
+
+		for _, origin := range hostCfg.Origins {
+			prefix := origin.Prefix
+			if prefix == "" || prefix == "/" {
+				hasRoot = true
+			} else {
+				hasPrefix = true
+
+				if !strings.HasPrefix(prefix, "/") {
+					return fmt.Errorf("host %s: origin prefix '%s' must start with /", host, prefix)
+				}
+				trimmed := strings.TrimPrefix(prefix, "/")
+				if strings.Contains(trimmed, "/") || trimmed == "" {
+					return fmt.Errorf("host %s: origin prefix '%s' must be exactly one level deep (e.g., /foo)", host, prefix)
+				}
+			}
+		}
+
+		if hasRoot && hasPrefix {
+			return errors.New("cannot mix root paths and prefixed paths for the same host: " + host)
+		}
+	}
+
+	return nil
 }

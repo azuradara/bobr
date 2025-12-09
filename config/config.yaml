@@ -17,6 +17,7 @@ hosts:
     origins:
       - name: bobr
         type: s3
+        prefix: /test
         config:
           bucket: bobr
           access_key: minio_access_key
@@ -25,6 +26,7 @@ hosts:
 
       - name: bobr-alt
         type: s3
+        prefix: /test
         config:
           bucket: bobr-alt
           access_key: minio_access_key

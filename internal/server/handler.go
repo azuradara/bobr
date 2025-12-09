@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -18,7 +19,7 @@ import (
 
 type Handler struct {
 	cache       *cache.Cache
-	hosts       map[string]config.HostConfig
+	hosts       map[string]*hostRouter
 	driverCache map[string]storage.Driver
 	mu          sync.RWMutex
 
@@ -26,14 +27,40 @@ type Handler struct {
 	OriginCalls int64
 }
 
+type hostRouter struct {
+	config  config.HostConfig
+	isRoot  bool
+	routes  map[string][]config.OriginConfig
+	origins []config.OriginConfig
+}
+
 func NewHandler(c *cache.Cache, hosts map[string]config.HostConfig) *Handler {
 	h := &Handler{
 		cache:       c,
-		hosts:       hosts,
+		hosts:       make(map[string]*hostRouter),
 		driverCache: make(map[string]storage.Driver),
 	}
 
-	for _, hostCfg := range hosts {
+	for name, hostCfg := range hosts {
+		router := &hostRouter{
+			config: hostCfg,
+			routes: make(map[string][]config.OriginConfig),
+		}
+
+		if len(hostCfg.Origins) > 0 {
+			firstPrefix := hostCfg.Origins[0].Prefix
+			if firstPrefix == "" || firstPrefix == "/" {
+				router.isRoot = true
+				router.origins = hostCfg.Origins
+			} else {
+				for _, o := range hostCfg.Origins {
+					router.routes[o.Prefix] = append(router.routes[o.Prefix], o)
+				}
+			}
+		}
+
+		h.hosts[name] = router
+
 		for _, originCfg := range hostCfg.Origins {
 			if _, exists := h.driverCache[originCfg.Name]; !exists {
 				if f, err := storage.NewDriver(originCfg); err == nil {
@@ -51,12 +78,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostCfg, ok := h.getHostConfig(w, r)
+	router, ok := h.getHostRouter(w, r)
 	if !ok {
 		return
 	}
 
-	cacheKey, transformParams := h.getCacheKey(r, hostCfg)
+	cacheKey, transformParams := h.getCacheKey(r, router.config)
 
 	if data, size, contentType, err := h.cache.Get(cacheKey); err == nil {
 		h.serveCacheHit(w, data, size, contentType)
@@ -66,7 +93,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("cache error", "err", err)
 	}
 
-	h.handleCacheMiss(w, r, hostCfg, cacheKey, transformParams)
+	h.handleCacheMiss(w, r, router, cacheKey, transformParams)
 }
 
 func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) bool {
@@ -83,8 +110,8 @@ func (h *Handler) handleOptions(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-func (h *Handler) getHostConfig(w http.ResponseWriter, r *http.Request) (config.HostConfig, bool) {
-	hostCfg, ok := h.hosts[r.Host]
+func (h *Handler) getHostRouter(w http.ResponseWriter, r *http.Request) (*hostRouter, bool) {
+	router, ok := h.hosts[r.Host]
 	if !ok {
 		if def, ok := h.hosts["_default"]; ok {
 			return def, true
@@ -92,10 +119,10 @@ func (h *Handler) getHostConfig(w http.ResponseWriter, r *http.Request) (config.
 
 		http.Error(w, "Host not configured", http.StatusNotFound)
 
-		return config.HostConfig{}, false
+		return nil, false
 	}
 
-	return hostCfg, true
+	return router, true
 }
 
 func (h *Handler) getCacheKey(
@@ -145,64 +172,102 @@ func (h *Handler) serveCacheHit(
 func (h *Handler) handleCacheMiss(
 	w http.ResponseWriter,
 	r *http.Request,
-	hostCfg config.HostConfig,
+	router *hostRouter,
 	cacheKey string,
 	transformParams transform.Params,
 ) {
-	if len(hostCfg.Origins) == 0 {
-		http.Error(w, "No origins configured", http.StatusServiceUnavailable)
-
-		return
-	}
-
-	originCfg := hostCfg.Origins[0]
-
-	driver, err := h.getDriver(originCfg)
-	if err != nil {
-		slog.Error("failed to create driver", "err", err)
-		http.Error(w, "Origin Error", http.StatusBadGateway)
-
-		return
-	}
-
-	atomic.AddInt64(&h.OriginCalls, 1)
-
-	path := r.URL.Path
-
-	body, _, contentType, err := driver.Fetch(r.Context(), path)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			slog.Debug("origin object not found", "path", path)
-			http.Error(w, "Not Found", http.StatusNotFound)
-
-			return
-		}
-
-		slog.Error("origin fetch failed", "err", err, "path", path)
+	origins := h.selectOrigins(router, r.URL.Path)
+	if len(origins) == 0 {
 		http.Error(w, "Not Found", http.StatusNotFound)
 
 		return
 	}
 
-	defer func() { _ = body.Close() }()
+	path := r.URL.Path
+	hostCfg := router.config
 
-	dataBytes, err := io.ReadAll(body)
-	if err != nil {
-		slog.Error("failed to read origin body", "err", err)
-		http.Error(w, "Origin IO Error", http.StatusBadGateway)
+	for i, originCfg := range origins {
+		originPath := path
+		if originCfg.Prefix != "" && originCfg.Prefix != "/" {
+			originPath = strings.TrimPrefix(path, originCfg.Prefix)
+			if !strings.HasPrefix(originPath, "/") {
+				originPath = "/" + originPath
+			}
+		}
+
+		driver, err := h.getDriver(originCfg)
+		if err != nil {
+			slog.Error("failed to create driver", "err", err, "origin", originCfg.Name)
+
+			if i == len(origins)-1 {
+				http.Error(w, "Origin Error", http.StatusBadGateway)
+
+				return
+			}
+
+			continue
+		}
+
+		atomic.AddInt64(&h.OriginCalls, 1)
+
+		body, _, contentType, err := driver.Fetch(r.Context(), originPath)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				slog.Debug("origin object not found", "path", originPath, "origin", originCfg.Name)
+			} else {
+				slog.Error("origin fetch failed", "err", err, "path", originPath, "origin", originCfg.Name)
+			}
+
+			if i == len(origins)-1 {
+				if errors.Is(err, storage.ErrNotFound) {
+					http.Error(w, "Not Found", http.StatusNotFound)
+				} else {
+					http.Error(w, "Origin IO Error", http.StatusBadGateway)
+				}
+
+				return
+			}
+
+			continue
+		}
+
+		defer func() { _ = body.Close() }()
+
+		dataBytes, err := io.ReadAll(body)
+		if err != nil {
+			slog.Error("failed to read origin body", "err", err, "origin", originCfg.Name)
+			http.Error(w, "Origin IO Error", http.StatusBadGateway)
+
+			return
+		}
+
+		dataBytes, contentType, size := h.processContent(
+			hostCfg,
+			transformParams,
+			dataBytes,
+			contentType,
+		)
+
+		h.asyncCache(cacheKey, dataBytes, contentType)
+		h.serveResponse(w, dataBytes, size, contentType)
 
 		return
 	}
+}
 
-	dataBytes, contentType, size := h.processContent(
-		hostCfg,
-		transformParams,
-		dataBytes,
-		contentType,
-	)
+func (h *Handler) selectOrigins(router *hostRouter, path string) []config.OriginConfig {
+	if router.isRoot {
+		return router.origins
+	}
 
-	h.asyncCache(cacheKey, dataBytes, contentType)
-	h.serveResponse(w, dataBytes, size, contentType)
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 {
+		return nil
+	}
+
+	requestPrefix := "/" + parts[1]
+
+	return router.routes[requestPrefix]
 }
 
 func (h *Handler) processContent(

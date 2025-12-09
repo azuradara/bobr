@@ -15,3 +15,7 @@ clean:
 
 run: build
 	./$(OUTDIR)/$(BINARY)
+
+lint:
+	golangci-lint run --fix
+	golangci-lint fmt
