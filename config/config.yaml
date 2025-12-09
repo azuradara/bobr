@@ -1,0 +1,41 @@
+listen: ':7040'
+
+logger:
+  level: debug
+
+cache:
+  dir: .cache
+  db_dir: .db
+  max_size: 256MB
+  max_object_size: 4MB
+
+hosts:
+  _default:
+    origins:
+      - name: bobr
+        type: s3
+        config:
+          bucket: bobr
+          access_key: minio_access_key
+          secret_key: minio_secret_key
+          endpoint: http://localhost:7777/
+
+      - name: bobr-alt
+        type: s3
+        config:
+          bucket: bobr-alt
+          access_key: minio_access_key
+          secret_key: minio_secret_key
+          endpoint: http://localhost:7777/
+
+  cdn.nirn.dev:
+    bustable: true
+
+    origins:
+      - name: bobr
+        type: s3
+        config:
+          bucket: bobr
+          access_key: minio_access_key
+          secret_key: minio_secret_key
+          endpoint: http://localhost:7777/
