@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/dustin/go-humanize v1.0.1
+	github.com/h2non/bimg v1.1.9
 	github.com/minio/minio-go/v7 v7.0.97
 	github.com/stretchr/testify v1.11.1
 	github.com/syndtr/goleveldb v1.0.0

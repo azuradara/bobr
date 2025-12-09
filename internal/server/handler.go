@@ -11,6 +11,7 @@ import (
 	"github.com/azuradara/bobr/internal/cache"
 	"github.com/azuradara/bobr/internal/config"
 	"github.com/azuradara/bobr/internal/storage"
+	"github.com/azuradara/bobr/internal/transform"
 )
 
 type Handler struct {
@@ -67,17 +68,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	cacheKey := r.Host + path
 
-	if hostCfg.Bustable && r.URL.RawQuery != "" {
+	var transformParams transform.Params
+
+	if hostCfg.Transform {
+		transformParams = transform.ParseParams(r.URL.Query())
+		cacheKey += transformParams.CacheKey()
+	}
+
+	if hostCfg.Optimize {
+		cacheKey += "_opt"
+	}
+
+	if hostCfg.Bustable && r.URL.RawQuery != "" && transformParams.Empty() {
 		cacheKey += "?" + r.URL.RawQuery
 	}
 
-	data, size, _, err := h.cache.Get(cacheKey)
+	data, size, contentType, err := h.cache.Get(cacheKey)
 
 	if err == nil {
 		defer func() { _ = data.Close() }()
 
 		w.Header().Set("X-Cache", "HIT")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", size))
+
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
 
 		n, _ := io.Copy(w, data)
 		atomic.AddInt64(&h.BytesOut, n)
@@ -97,7 +113,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	originCfg := hostCfg.Origins[0]
 
 	driver, err := h.getDriver(originCfg)
-
 	if err != nil {
 		slog.Error("failed to create driver", "err", err)
 		http.Error(w, "Origin Error", http.StatusBadGateway)
@@ -108,7 +123,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atomic.AddInt64(&h.OriginCalls, 1)
 
 	body, size, contentType, err := driver.Fetch(r.Context(), path)
-
 	if err != nil {
 		slog.Error("origin fetch failed", "err", err, "path", path)
 		http.Error(w, "Not Found", http.StatusNotFound)
@@ -119,7 +133,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = body.Close() }()
 
 	dataBytes, err := io.ReadAll(body)
-
 	if err != nil {
 		slog.Error("failed to read origin body", "err", err)
 		http.Error(w, "Origin IO Error", http.StatusBadGateway)
@@ -127,8 +140,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shouldTransform := hostCfg.Transform && !transformParams.Empty() && transform.IsImage(contentType)
+	shouldOptimize := hostCfg.Optimize && transform.IsImage(contentType)
+
+	if shouldTransform || shouldOptimize {
+		transformed, newContentType, err := transform.Apply(dataBytes, transformParams, shouldOptimize)
+
+		if err != nil {
+			slog.Error("transform failed", "err", err)
+		} else {
+			dataBytes = transformed
+			size = int64(len(dataBytes))
+			contentType = newContentType
+		}
+	}
+
+	finalContentType := contentType
+	if finalContentType == "" {
+		finalContentType = http.DetectContentType(dataBytes)
+	}
+
 	go func() {
-		if err := h.cache.Set(cacheKey, dataBytes); err != nil {
+		if err := h.cache.Set(cacheKey, dataBytes, finalContentType); err != nil {
 			slog.Warn("failed to cache", "key", cacheKey, "err", err)
 		}
 	}()

@@ -27,7 +27,7 @@ func TestCache_Stats(t *testing.T) {
 	_, _, _, err = c.Get("miss")
 	assert.Equal(t, ErrNotFound, err)
 
-	_ = c.Set("hit", []byte("val"))
+	_ = c.Set("hit", []byte("val"), "")
 	data, _, _, err := c.Get("hit")
 	assert.NoError(t, err)
 	_ = data.Close()
@@ -53,7 +53,7 @@ func TestCache_Sharding(t *testing.T) {
 	defer func() { _ = c.Close() }()
 
 	key := "my-key"
-	err = c.Set(key, []byte("data"))
+	err = c.Set(key, []byte("data"), "")
 	assert.NoError(t, err)
 
 	entries, err := os.ReadDir(cfg.Dir)
@@ -83,7 +83,7 @@ func TestCache_Basic(t *testing.T) {
 	assert.NoError(t, err)
 	defer func() { _ = c.Close() }()
 
-	err = c.Set("key1", []byte("value1"))
+	err = c.Set("key1", []byte("value1"), "")
 	assert.NoError(t, err)
 
 	data, _, _, err := c.Get("key1")
@@ -113,7 +113,7 @@ func TestCache_LRU(t *testing.T) {
 	val := []byte("12345678901234567890")
 
 	for i := 0; i < 4; i++ {
-		err := c.Set(fmt.Sprintf("key%d", i), val)
+		err := c.Set(fmt.Sprintf("key%d", i), val, "")
 		assert.NoError(t, err)
 		time.Sleep(1 * time.Millisecond)
 	}
@@ -142,7 +142,7 @@ func TestCache_LRU(t *testing.T) {
 		_ = data.Close()
 	}
 
-	err = c.Set("key4", bigVal)
+	err = c.Set("key4", bigVal, "")
 	assert.NoError(t, err)
 
 	data, _, _, err = c.Get("key1")
@@ -174,7 +174,7 @@ func TestCache_TinyLFU_Admission(t *testing.T) {
 
 	val := []byte("1234567890")
 
-	_ = c.Set("frequent", val)
+	_ = c.Set("frequent", val, "")
 	for i := 0; i < 10; i++ {
 		if data, _, _, _ := c.Get("frequent"); data != nil {
 			_ = data.Close()
@@ -182,11 +182,11 @@ func TestCache_TinyLFU_Admission(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		_ = c.Set(fmt.Sprintf("junk%d", i), val)
+		_ = c.Set(fmt.Sprintf("junk%d", i), val, "")
 	}
 
-	_ = c.Set("junk3", val)
-	_ = c.Set("new_item", val)
+	_ = c.Set("junk3", val, "")
+	_ = c.Set("new_item", val, "")
 }
 
 func TestCache_Persistence(t *testing.T) {
@@ -201,7 +201,7 @@ func TestCache_Persistence(t *testing.T) {
 
 	c, err := New(cfg)
 	assert.NoError(t, err)
-	_ = c.Set("persist", []byte("data"))
+	_ = c.Set("persist", []byte("data"), "")
 	_ = c.Close()
 
 	c2, err := New(cfg)

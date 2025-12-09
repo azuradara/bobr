@@ -11,6 +11,9 @@ cache:
 
 hosts:
   _default:
+    optimize: true
+    transform: true
+
     origins:
       - name: bobr
         type: s3

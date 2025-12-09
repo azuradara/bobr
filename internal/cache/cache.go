@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -23,9 +22,10 @@ import (
 var ErrNotFound = errors.New("key not found in cache")
 
 type Metadata struct {
-	Size       int64     `json:"size"`
-	LastAccess time.Time `json:"last_access"`
-	Key        string    `json:"key"`
+	Size        int64     `json:"size"`
+	LastAccess  time.Time `json:"last_access"`
+	Key         string    `json:"key"`
+	ContentType string    `json:"content_type"`
 }
 
 type Cache struct {
@@ -127,7 +127,7 @@ func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
 	}
 
 	atomic.AddInt64(&c.Hits, 1)
-	return f, meta.Size, http.DetectContentType(nil), nil
+	return f, meta.Size, meta.ContentType, nil
 }
 
 func (c *Cache) cleanupStaleEntry(key string, size int64) {
@@ -140,7 +140,7 @@ func (c *Cache) cleanupStaleEntry(key string, size int64) {
 	}
 }
 
-func (c *Cache) Set(key string, value []byte) error {
+func (c *Cache) Set(key string, value []byte, contentType string) error {
 	size := int64(len(value))
 	if size > c.maxSize {
 		return fmt.Errorf("object too large")
@@ -216,9 +216,10 @@ func (c *Cache) Set(key string, value []byte) error {
 	defer c.mu.Unlock()
 
 	meta := Metadata{
-		Size:       size,
-		LastAccess: time.Now(),
-		Key:        key,
+		Size:        size,
+		LastAccess:  time.Now(),
+		Key:         key,
+		ContentType: contentType,
 	}
 	metaJSON, _ := json.Marshal(meta)
 

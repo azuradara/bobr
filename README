@@ -1,0 +1,21 @@
+bobr - multi-origin content delivery edge with transforms and optimizations
+
+DEPENDENCIES
+  - Go 1.25+
+  - libvips libwebp libheif
+
+BUILD
+  make
+
+RUN
+  ./bin/bobr -c config/config.yaml
+
+CONFIG
+  See config/config.yaml for S3, cache, and host settings.
+
+TRANSFORMS
+  ?width=N    Resize to width (maintains aspect ratio)
+  ?height=N   Resize to height (maintains aspect ratio)
+  ?crop=X     Crop position: center, top, bottom, left, right
+
+Set transform: true and/or optimize: true per host in config.
