@@ -1,4 +1,4 @@
-bóbr - multi-origin content delivery edge with transforms and optimizations
+bóbr - multi-origin content delivery edge
 
 DEPENDENCIES
   - Go 1.25+
@@ -18,4 +18,29 @@ TRANSFORMS
   ?height=N   Resize to height (maintains aspect ratio)
   ?crop=X     Crop position: center, top, bottom, left, right
 
-Set transform: true and/or optimize: true per host in config.
+  Set transform: true and/or optimize: true per host in config.
+
+MOTIVATION
+  Needed a cheap and fast alternative to paying for a CDN.
+
+BENCHMARKS
+  commit: 12d1b36
+  cpu: AMD Ryzen 9 7900X
+
+  internal/transform
+  Resize_Small-24                2104        5,917,798 ns/op          1,863 B/op    10 allocs/op
+  Resize_Medium-24                853       13,520,179 ns/op         98,360 B/op     8 allocs/op
+  Crop_Center-24                  895       13,436,635 ns/op         98,360 B/op     8 allocs/op
+  Parallel-Resize_Small-24       7580        1,456,246 ns/op          1,868 B/op    10 allocs/op
+  Parallel-Resize_Medium-24      6924        1,562,902 ns/op         98,363 B/op     8 allocs/op
+  Parallel-Crop_Center-24        7296        1,549,709 ns/op         98,361 B/op     8 allocs/op
+  Optimize-24                      99      113,957,334 ns/op        688,176 B/op     7 allocs/op
+  OptimizeParallel-24            1458        7,686,340 ns/op        688,185 B/op     7 allocs/op
+
+  internal/cache
+  Set-24                        546896          18,533 ns/op          3,512 B/op    45 allocs/op
+  Get_Hit-24                 1,000,000          10,230 ns/op          3,626 B/op    39 allocs/op
+  Get_Miss-24                8,760,471           1,308 ns/op            728 B/op    15 allocs/op
+  Set_Parallel-24              842,605          15,412 ns/op          4,398 B/op    45 allocs/op
+  Get_Hit_Parallel-24          984,109          11,951 ns/op          3,726 B/op    40 allocs/op
+  Get_Miss_Parallel-24       8,001,622           1,432 ns/op            733 B/op    15 allocs/op
