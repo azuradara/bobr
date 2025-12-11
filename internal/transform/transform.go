@@ -98,15 +98,15 @@ func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 	}
 
 	opts := bimg.Options{
-		Quality:       80,
+		Quality:       84,
 		StripMetadata: true,
 		Interlace:     true,
 		NoAutoRotate:  true,
-		Interpolator:  bimg.Nohalo,
+		Interpolator:  bimg.Bicubic,
 	}
 
 	if optimize {
-		opts.Quality = 80
+		opts.Quality = 84
 		opts.Lossless = false
 		opts.Type = bimg.WEBP
 	}
