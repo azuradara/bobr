@@ -41,6 +41,7 @@ func TestIsAnimated(t *testing.T) {
 				copy(buf[8:], "WEBP")
 				copy(buf[12:], "VP8X")
 				buf[20] = 0x02
+
 				return buf
 			}(),
 			expected: true,
@@ -53,6 +54,7 @@ func TestIsAnimated(t *testing.T) {
 				copy(buf[8:], "WEBP")
 				copy(buf[12:], "VP8X")
 				buf[20] = 0x00
+
 				return buf
 			}(),
 			expected: false,
@@ -71,6 +73,7 @@ func TestIsAnimated(t *testing.T) {
 				buf = append(buf, 0, 0, 0, 0)
 				buf = append(buf, []byte("IEND")...)
 				buf = append(buf, 0, 0, 0, 0)
+
 				return buf
 			}(),
 			expected: false,
@@ -95,6 +98,7 @@ func TestIsAnimated(t *testing.T) {
 				buf = append(buf, 0, 0, 0, 0)
 				buf = append(buf, []byte("IEND")...)
 				buf = append(buf, 0, 0, 0, 0)
+
 				return buf
 			}(),
 			expected: true,

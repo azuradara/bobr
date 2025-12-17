@@ -115,6 +115,7 @@ func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 		case bimg.PNG:
 			contentType = "image/png"
 		}
+
 		return data, contentType, nil
 	}
 
@@ -207,7 +208,17 @@ func IsAnimated(data []byte) bool {
 	if string(data[1:4]) == "PNG" {
 		offset := 8
 		for offset+8 < len(data) {
-			chunkDataLen := int(uint32(data[offset])<<24 | uint32(data[offset+1])<<16 | uint32(data[offset+2])<<8 | uint32(data[offset+3]))
+			chunkDataLen := int(
+				uint32(
+					data[offset],
+				)<<24 | uint32(
+					data[offset+1],
+				)<<16 | uint32(
+					data[offset+2],
+				)<<8 | uint32(
+					data[offset+3],
+				),
+			)
 			chunkType := string(data[offset+4 : offset+8])
 
 			if chunkType == "acTL" {
