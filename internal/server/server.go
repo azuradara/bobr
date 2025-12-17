@@ -40,7 +40,11 @@ func New(cfg *config.Config, cache *cache.Cache, hosts map[string]config.HostCon
 	mux.Handle("/", proxyHandler)
 
 	srv.httpServer = &http.Server{
-		Addr: cfg.Listen,
+		Addr:              cfg.Listen,
+		ReadHeaderTimeout: 4 * time.Second,
+		ReadTimeout:       4 * time.Second,
+		WriteTimeout:      4 * time.Second,
+		IdleTimeout:       4 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var final http.Handler = srv.mux
 			for i := len(srv.middleware) - 1; i >= 0; i-- {

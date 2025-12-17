@@ -104,6 +104,20 @@ func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 		return data, "image/gif", nil
 	}
 
+	if IsAnimated(data) {
+		contentType := "application/octet-stream"
+
+		switch imageType {
+		case bimg.GIF:
+			contentType = "image/gif"
+		case bimg.WEBP:
+			contentType = "image/webp"
+		case bimg.PNG:
+			contentType = "image/png"
+		}
+		return data, contentType, nil
+	}
+
 	img := bimg.NewImage(data)
 
 	size, err := img.Size()
@@ -170,6 +184,45 @@ func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 	}
 
 	return result, contentType, nil
+}
+
+func IsAnimated(data []byte) bool {
+	if len(data) < 12 {
+		return false
+	}
+
+	if string(data[:3]) == "GIF" {
+		return true
+	}
+
+	if string(data[8:12]) == "WEBP" {
+		if len(data) >= 21 && string(data[12:16]) == "VP8X" {
+			flags := data[20]
+			if flags&0x02 != 0 {
+				return true
+			}
+		}
+	}
+
+	if string(data[1:4]) == "PNG" {
+		offset := 8
+		for offset+8 < len(data) {
+			chunkDataLen := int(uint32(data[offset])<<24 | uint32(data[offset+1])<<16 | uint32(data[offset+2])<<8 | uint32(data[offset+3]))
+			chunkType := string(data[offset+4 : offset+8])
+
+			if chunkType == "acTL" {
+				return true
+			}
+
+			if chunkType == "IEND" {
+				break
+			}
+
+			offset += chunkDataLen + 12
+		}
+	}
+
+	return false
 }
 
 func Optimize(data []byte) ([]byte, string, error) {
