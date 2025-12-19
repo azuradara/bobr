@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -284,6 +285,47 @@ func (c *Cache) deleteMeta(key string, meta Metadata) error {
 
 func (c *Cache) deleteBlob(key string) error {
 	return os.Remove(c.getBlobPath(key))
+}
+
+func (c *Cache) Purge(target string) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	iter := c.disk.NewIterator(util.BytesPrefix([]byte("entry:")), nil)
+	defer iter.Release()
+
+	var victims []struct {
+		key  string
+		meta Metadata
+	}
+
+	for iter.Next() {
+		key := string(iter.Key()[6:])
+		if strings.Contains(key, target) {
+			var meta Metadata
+			if err := json.Unmarshal(iter.Value(), &meta); err == nil {
+				victims = append(victims, struct {
+					key  string
+					meta Metadata
+				}{key, meta})
+			}
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, v := range victims {
+		if err := c.deleteMeta(v.key, v.meta); err != nil {
+			return count, err
+		}
+		_ = c.deleteBlob(v.key)
+		count++
+	}
+
+	return count, nil
 }
 
 func (c *Cache) Close() error {
