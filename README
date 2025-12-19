@@ -8,17 +8,39 @@ BUILD
   make
 
 RUN
-  ./bin/bobr -c config/config.yaml
+  bobr [command]
+
+  server  -c <file>   Start server (default)
+  migrate <file>      Migrate v1 config to v2
+  purge   <prefix>    Purge cache objects
+  version             Print version
 
 CONFIG
-  See config/config.yaml for S3, cache, and host settings.
+  See config/config.yaml. Structure:
 
-TRANSFORMS
-  ?width=N    Resize to width (maintains aspect ratio)
-  ?height=N   Resize to height (maintains aspect ratio)
-  ?crop=X     Crop position: center, top, bottom, left, right
+  listen: :7040
+  logger: { level: debug }
+  cache:  { dir: .cache, db_dir: .db, max_size: 256MB, max_object_size: 4MB }
+  
+  hosts:
+    example.com:
+      bustable: true
+      transforms:
+        optimize: true
+        lossless: false
+        resize:   true
+        resize_presets: { sm: 100 }
+      origins:
+        - name:   s3-main
+          prefix: /
+          type:   s3
+          transforms: { optimize: false } # Override
+          config: { bucket: ..., endpoint: ..., region: ..., access_key: ..., secret_key: ... }
 
-  Set transform: true and/or optimize: true per host in config.
+TRANSFORMS (URL params)
+  ?width=N    Resize to width
+  ?height=N   Resize to height
+  ?crop=X     Crop (center, top, bottom, left, right)
 
 MOTIVATION
   Needed a cheap and fast alternative to paying for a CDN.

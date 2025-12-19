@@ -89,7 +89,7 @@ func IsImage(contentType string) bool {
 	return strings.HasPrefix(contentType, "image/")
 }
 
-func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
+func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string, error) {
 	imageType := bimg.DetermineImageType(data)
 
 	if imageType == bimg.SVG {
@@ -136,7 +136,7 @@ func Apply(data []byte, p Params, optimize bool) ([]byte, string, error) {
 
 	if optimize {
 		opts.Quality = 84
-		opts.Lossless = false
+		opts.Lossless = lossless
 		if imageType != bimg.GIF {
 			opts.Type = bimg.WEBP
 		}
@@ -237,7 +237,7 @@ func IsAnimated(data []byte) bool {
 }
 
 func Optimize(data []byte) ([]byte, string, error) {
-	return Apply(data, Params{}, true)
+	return Apply(data, Params{}, true, false)
 }
 
 func cropToGravity(c Crop) bimg.Gravity {

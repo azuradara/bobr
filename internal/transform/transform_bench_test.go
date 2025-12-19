@@ -43,7 +43,7 @@ func BenchmarkApply(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_, _, err := Apply(srcData, bm.params, false)
+				_, _, err := Apply(srcData, bm.params, false, false)
 				if err != nil {
 					b.Fatalf("Apply failed: %v", err)
 				}
@@ -68,7 +68,7 @@ func BenchmarkApplyParallel(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					_, _, err := Apply(srcData, bm.params, false)
+					_, _, err := Apply(srcData, bm.params, false, false)
 					if err != nil {
 						b.Fatalf("Apply failed: %v", err)
 					}

@@ -52,15 +52,19 @@ func TestLegacyPresets(t *testing.T) {
 
 	hosts := map[string]config.HostConfig{
 		"legacy.test": {
-			TransformPresets: map[string]int{
-				"md": 100,
+			Transforms: config.TransformsConfig{
+				ResizePresets: map[string]int{
+					"md": 100,
+				},
 			},
 			Origins: []config.OriginConfig{
 				{Name: "mock", Prefix: "/"},
 			},
 		},
 		"standard.test": {
-			Transform: true,
+			Transforms: config.TransformsConfig{
+				Resize: true,
+			},
 			Origins: []config.OriginConfig{
 				{Name: "mock", Prefix: "/"},
 			},

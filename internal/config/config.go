@@ -21,25 +21,32 @@ type CacheConfig struct {
 }
 
 type OriginConfig struct {
-	Name   string            `yaml:"name"`
-	Type   string            `yaml:"type"`
-	Prefix string            `yaml:"prefix"`
-	Config map[string]string `yaml:"config"`
+	Name       string            `yaml:"name"`
+	Type       string            `yaml:"type"`
+	Prefix     string            `yaml:"prefix"`
+	Transforms *TransformsConfig `yaml:"transforms,omitempty"`
+	Config     map[string]string `yaml:"config"`
 }
 
 type HostConfig struct {
-	Bustable         bool           `yaml:"bustable"`
-	Transform        bool           `yaml:"transform"`
-	TransformPresets map[string]int `yaml:"transform_presets"`
-	Optimize         bool           `yaml:"optimize"`
-	Origins          []OriginConfig `yaml:"origins"`
+	Bustable   bool             `yaml:"bustable"`
+	Transforms TransformsConfig `yaml:"transforms"`
+	Origins    []OriginConfig   `yaml:"origins"`
+}
+
+type TransformsConfig struct {
+	Optimize      bool           `yaml:"optimize"`
+	Lossless      bool           `yaml:"lossless"`
+	Resize        bool           `yaml:"resize"`
+	ResizePresets map[string]int `yaml:"resize_presets"`
 }
 
 type Config struct {
-	Listen string                `yaml:"listen"`
-	Logger LoggerConfig          `yaml:"logger"`
-	Cache  CacheConfig           `yaml:"cache"`
-	Hosts  map[string]HostConfig `yaml:"hosts"`
+	Version string                `yaml:"version"`
+	Listen  string                `yaml:"listen"`
+	Logger  LoggerConfig          `yaml:"logger"`
+	Cache   CacheConfig           `yaml:"cache"`
+	Hosts   map[string]HostConfig `yaml:"hosts"`
 }
 
 func Load(path string) (*Config, error) {
