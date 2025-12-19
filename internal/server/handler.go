@@ -146,9 +146,9 @@ func (h *Handler) resolveRequest(
 		cacheKey:      r.Host + path,
 	}
 
-	if len(hostCfg.TransformPresets) > 0 {
+	if len(hostCfg.Transforms.ResizePresets) > 0 {
 		//nolint:staticcheck // legacy feature
-		if orig, width, ok := transform.ParsePreset(path, hostCfg.TransformPresets); ok {
+		if orig, width, ok := transform.ParsePreset(path, hostCfg.Transforms.ResizePresets); ok {
 			ctx.transformParams = transform.Params{Width: width}
 			ctx.effectivePath = orig
 			ctx.cacheKey = r.Host + ctx.effectivePath + ctx.transformParams.CacheKey()
@@ -158,12 +158,12 @@ func (h *Handler) resolveRequest(
 				return requestContext{}, errors.New("invalid preset")
 			}
 		}
-	} else if hostCfg.Transform {
+	} else if hostCfg.Transforms.Resize {
 		ctx.transformParams = transform.ParseParams(r.URL.Query())
 		ctx.cacheKey += ctx.transformParams.CacheKey()
 	}
 
-	if hostCfg.Optimize {
+	if hostCfg.Transforms.Optimize {
 		ctx.cacheKey += "_opt"
 	}
 
@@ -298,9 +298,9 @@ func (h *Handler) processContent(
 	dataBytes []byte,
 	contentType string,
 ) ([]byte, string, int64) {
-	shouldTransform := hostCfg.Transform && !transformParams.Empty() &&
+	shouldTransform := hostCfg.Transforms.Resize && !transformParams.Empty() &&
 		transform.IsImage(contentType)
-	shouldOptimize := hostCfg.Optimize && transform.IsImage(contentType)
+	shouldOptimize := hostCfg.Transforms.Optimize && transform.IsImage(contentType)
 
 	if shouldTransform || shouldOptimize {
 		transformed, newContentType, err := transform.Apply(

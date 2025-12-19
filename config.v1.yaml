@@ -1,0 +1,25 @@
+version: "2"
+listen: :7040
+logger:
+    level: debug
+cache:
+    dir: .cache
+    db_dir: .db
+    max_size: 256MB
+    max_object_size: 4MB
+hosts:
+    _default:
+        bustable: false
+        transforms:
+            optimize: true
+            resize: true
+            resize_presets:
+                md: 453
+                sm: 108
+        origins:
+            - name: bobr
+              type: s3
+              prefix: /test
+              config:
+                bucket: bobr
+                endpoint: http://localhost:7777/

@@ -1,4 +1,4 @@
-.PHONY: build test lint clean run
+.PHONY: build test lint clean run install
 
 BINARY := bobr
 OUTDIR := bin
@@ -15,6 +15,9 @@ clean:
 
 run: build
 	./$(OUTDIR)/$(BINARY)
+
+install:
+	go install ./cmd/bobr
 
 lint:
 	golangci-lint run --fix

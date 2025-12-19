@@ -1,50 +1,50 @@
-listen: ':7040'
-
+version: "2"
+listen: :7040
 logger:
-  level: debug
-
+    level: debug
 cache:
-  dir: .cache
-  db_dir: .db
-  max_size: 256MB
-  max_object_size: 4MB
-
+    dir: .cache
+    db_dir: .db
+    max_size: 256MB
+    max_object_size: 4MB
 hosts:
-  _default:
-    optimize: true
-    transform: true
-    transform_presets:
-      sm: 108
-      md: 453
-      lg: 680
-
-    origins:
-      - name: bobr
-        type: s3
-        prefix: /test
-        config:
-          bucket: bobr
-          access_key: minio_access_key
-          secret_key: minio_secret_key
-          endpoint: http://localhost:7777/
-
-      - name: bobr-alt
-        type: s3
-        prefix: /test
-        config:
-          bucket: bobr-alt
-          access_key: minio_access_key
-          secret_key: minio_secret_key
-          endpoint: http://localhost:7777/
-
-  cdn.nirn.dev:
-    bustable: true
-
-    origins:
-      - name: bobr
-        type: s3
-        config:
-          bucket: bobr
-          access_key: minio_access_key
-          secret_key: minio_secret_key
-          endpoint: http://localhost:7777/
+    _default:
+        bustable: false
+        transforms:
+            optimize: true
+            resize: true
+            resize_presets:
+                lg: 680
+                md: 453
+                sm: 108
+        origins:
+            - name: bobr
+              type: s3
+              prefix: /test
+              config:
+                bucket: bobr
+                access_key: minio_access_key
+                secret_key: minio_secret_key
+                endpoint: http://localhost:7777/
+            - name: bobr-alt
+              type: s3
+              prefix: /test
+              config:
+                bucket: bobr-alt
+                access_key: minio_access_key
+                secret_key: minio_secret_key
+                endpoint: http://localhost:7777/
+    cdn.nirn.dev:
+        bustable: true
+        transforms:
+            optimize: false
+            resize: false
+            resize_presets: {}
+        origins:
+            - name: bobr
+              type: s3
+              config:
+                bucket: bobr
+                access_key: minio_access_key
+                secret_key: minio_secret_key
+                endpoint: http://localhost:7777/
