@@ -12,6 +12,7 @@ hosts:
         bustable: false
         transforms:
             optimize: true
+            lossless: false
             resize: true
             resize_presets:
                 md: 453

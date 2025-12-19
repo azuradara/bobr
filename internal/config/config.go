@@ -21,10 +21,11 @@ type CacheConfig struct {
 }
 
 type OriginConfig struct {
-	Name   string            `yaml:"name"`
-	Type   string            `yaml:"type"`
-	Prefix string            `yaml:"prefix"`
-	Config map[string]string `yaml:"config"`
+	Name       string            `yaml:"name"`
+	Type       string            `yaml:"type"`
+	Prefix     string            `yaml:"prefix"`
+	Transforms *TransformsConfig `yaml:"transforms,omitempty"`
+	Config     map[string]string `yaml:"config"`
 }
 
 type HostConfig struct {
@@ -35,6 +36,7 @@ type HostConfig struct {
 
 type TransformsConfig struct {
 	Optimize      bool           `yaml:"optimize"`
+	Lossless      bool           `yaml:"lossless"`
 	Resize        bool           `yaml:"resize"`
 	ResizePresets map[string]int `yaml:"resize_presets"`
 }

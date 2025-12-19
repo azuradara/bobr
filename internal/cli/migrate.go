@@ -26,6 +26,7 @@ type legacyConfig struct {
 
 type v2TransformsConfig struct {
 	Optimize      bool           `yaml:"optimize"`
+	Lossless      bool           `yaml:"lossless"`
 	Resize        bool           `yaml:"resize"`
 	ResizePresets map[string]int `yaml:"resize_presets"`
 }

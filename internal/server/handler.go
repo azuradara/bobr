@@ -35,9 +35,10 @@ type hostRouter struct {
 }
 
 type requestContext struct {
-	cacheKey        string
-	transformParams transform.Params
-	effectivePath   string
+	cacheKey            string
+	transformParams     transform.Params
+	effectivePath       string
+	effectiveTransforms config.TransformsConfig
 }
 
 func NewHandler(c *cache.Cache, hosts map[string]config.HostConfig) *Handler {
@@ -89,7 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reqCtx, err := h.resolveRequest(r, router.config)
+	reqCtx, err := h.resolveRequest(r, router)
 	if err != nil {
 		http.Error(w, "Not Found", http.StatusNotFound)
 
@@ -138,17 +139,26 @@ func (h *Handler) getHostRouter(w http.ResponseWriter, r *http.Request) (*hostRo
 
 func (h *Handler) resolveRequest(
 	r *http.Request,
-	hostCfg config.HostConfig,
+	router *hostRouter,
 ) (requestContext, error) {
 	path := r.URL.Path
-	ctx := requestContext{
-		effectivePath: path,
-		cacheKey:      r.Host + path,
+	hostCfg := router.config
+	effectiveTransforms := hostCfg.Transforms
+
+	origins := h.selectOrigins(router, path)
+	if len(origins) > 0 && origins[0].Transforms != nil {
+		effectiveTransforms = *origins[0].Transforms
 	}
 
-	if len(hostCfg.Transforms.ResizePresets) > 0 {
+	ctx := requestContext{
+		effectivePath:       path,
+		cacheKey:            r.Host + path,
+		effectiveTransforms: effectiveTransforms,
+	}
+
+	if len(effectiveTransforms.ResizePresets) > 0 {
 		//nolint:staticcheck // legacy feature
-		if orig, width, ok := transform.ParsePreset(path, hostCfg.Transforms.ResizePresets); ok {
+		if orig, width, ok := transform.ParsePreset(path, effectiveTransforms.ResizePresets); ok {
 			ctx.transformParams = transform.Params{Width: width}
 			ctx.effectivePath = orig
 			ctx.cacheKey = r.Host + ctx.effectivePath + ctx.transformParams.CacheKey()
@@ -158,12 +168,12 @@ func (h *Handler) resolveRequest(
 				return requestContext{}, errors.New("invalid preset")
 			}
 		}
-	} else if hostCfg.Transforms.Resize {
+	} else if effectiveTransforms.Resize {
 		ctx.transformParams = transform.ParseParams(r.URL.Query())
 		ctx.cacheKey += ctx.transformParams.CacheKey()
 	}
 
-	if hostCfg.Transforms.Optimize {
+	if effectiveTransforms.Optimize {
 		ctx.cacheKey += "_opt"
 	}
 
@@ -205,8 +215,6 @@ func (h *Handler) handleCacheMiss(
 
 		return
 	}
-
-	hostCfg := router.config
 
 	for i, originCfg := range origins {
 		originPath := reqCtx.effectivePath
@@ -264,7 +272,7 @@ func (h *Handler) handleCacheMiss(
 		}
 
 		dataBytes, contentType, size := h.processContent(
-			hostCfg,
+			reqCtx.effectiveTransforms,
 			reqCtx.transformParams,
 			dataBytes,
 			contentType,
@@ -293,20 +301,21 @@ func (h *Handler) selectOrigins(router *hostRouter, path string) []config.Origin
 }
 
 func (h *Handler) processContent(
-	hostCfg config.HostConfig,
+	transforms config.TransformsConfig,
 	transformParams transform.Params,
 	dataBytes []byte,
 	contentType string,
 ) ([]byte, string, int64) {
-	shouldTransform := hostCfg.Transforms.Resize && !transformParams.Empty() &&
+	shouldTransform := transforms.Resize && !transformParams.Empty() &&
 		transform.IsImage(contentType)
-	shouldOptimize := hostCfg.Transforms.Optimize && transform.IsImage(contentType)
+	shouldOptimize := transforms.Optimize && transform.IsImage(contentType)
 
 	if shouldTransform || shouldOptimize {
 		transformed, newContentType, err := transform.Apply(
 			dataBytes,
 			transformParams,
 			shouldOptimize,
+			transforms.Lossless,
 		)
 		if err != nil {
 			slog.Error("transform failed", "err", err)
