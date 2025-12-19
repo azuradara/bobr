@@ -38,6 +38,7 @@ func init() {
 		StringVarP(&cfgFile, "config", "c", "config/config.yaml", "config file path")
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(purgeCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 func runServer() error {
