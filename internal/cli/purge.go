@@ -34,6 +34,7 @@ func runPurge(target string) error {
 	count, err := c.Purge(target)
 	if err != nil {
 		fmt.Println("[fail]")
+
 		return fmt.Errorf("failed to purge cache: %w", err)
 	}
 
