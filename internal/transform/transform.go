@@ -92,31 +92,14 @@ func IsImage(contentType string) bool {
 func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string, error) {
 	imageType := bimg.DetermineImageType(data)
 
-	if imageType == bimg.SVG {
-		return data, "image/svg+xml", nil
-	}
-
-	if len(data) > 4 && data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0x00 {
-		return data, "image/x-icon", nil
-	}
-
-	if imageType == bimg.GIF && p.Empty() {
-		return data, "image/gif", nil
-	}
-
-	if IsAnimated(data) {
-		contentType := "application/octet-stream"
-
-		switch imageType {
-		case bimg.GIF:
-			contentType = "image/gif"
-		case bimg.WEBP:
-			contentType = "image/webp"
-		case bimg.PNG:
-			contentType = "image/png"
+	switch imageType {
+	case bimg.JPEG, bimg.HEIF, bimg.AVIF:
+	case bimg.PNG:
+		if IsAnimated(data) {
+			return data, "image/png", nil
 		}
-
-		return data, contentType, nil
+	default:
+		return data, getContentType(data, imageType), nil
 	}
 
 	img := bimg.NewImage(data)
@@ -164,24 +147,7 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 	if optimize && imageType != bimg.GIF {
 		contentType = "image/webp"
 	} else {
-		switch bimg.DetermineImageType(result) {
-		case bimg.JPEG:
-			contentType = "image/jpeg"
-		case bimg.PNG:
-			contentType = "image/png"
-		case bimg.GIF:
-			contentType = "image/gif"
-		case bimg.WEBP:
-			contentType = "image/webp"
-		case bimg.HEIF:
-			contentType = "image/heif"
-		case bimg.AVIF:
-			contentType = "image/avif"
-		case bimg.SVG:
-			contentType = "image/svg+xml"
-		default:
-			contentType = "application/octet-stream"
-		}
+		contentType = getContentType(result, bimg.DetermineImageType(result))
 	}
 
 	return result, contentType, nil
