@@ -113,7 +113,7 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 		Quality:       84,
 		StripMetadata: true,
 		Interlace:     true,
-		NoAutoRotate:  true,
+		NoAutoRotate:  false,
 		Interpolator:  bimg.Bicubic,
 	}
 
