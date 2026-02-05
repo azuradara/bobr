@@ -84,7 +84,11 @@ func (c *Config) Validate() error {
 				}
 				trimmed := strings.TrimPrefix(prefix, "/")
 				if strings.Contains(trimmed, "/") || trimmed == "" {
-					return fmt.Errorf("host %s: origin prefix '%s' must be exactly one level deep (e.g., /foo)", host, prefix)
+					return fmt.Errorf(
+						"host %s: origin prefix '%s' must be exactly one level deep (e.g., /foo)",
+						host,
+						prefix,
+					)
 				}
 			}
 		}

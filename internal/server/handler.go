@@ -245,7 +245,15 @@ func (h *Handler) handleCacheMiss(
 			if errors.Is(err, storage.ErrNotFound) {
 				slog.Debug("origin object not found", "path", originPath, "origin", originCfg.Name)
 			} else {
-				slog.Error("origin fetch failed", "err", err, "path", originPath, "origin", originCfg.Name)
+				slog.Error(
+					"origin fetch failed",
+					"err",
+					err,
+					"path",
+					originPath,
+					"origin",
+					originCfg.Name,
+				)
 			}
 
 			if i == len(origins)-1 {

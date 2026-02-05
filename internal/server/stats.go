@@ -27,11 +27,15 @@ bobr_bytes_out_total %d
 bobr_s3_calls_total %d
 # HELP bobr_cache_flushed_total Total number of evicted items
 # TYPE bobr_cache_flushed_total counter
-bobr_cache_flushed_total %d`,
+bobr_cache_flushed_total %d
+# HELP bobr_cache_flushed_bytes_total Total bytes size of evicted items
+# TYPE bobr_cache_flushed_bytes_total counter
+bobr_cache_flushed_bytes_total %d`,
 			uptime,
 			atomic.LoadInt64(&srv.handler.BytesOut),
 			atomic.LoadInt64(&srv.handler.OriginCalls),
 			atomic.LoadInt64(&c.Flushed),
+			atomic.LoadInt64(&c.FlushedBytes),
 		)
 
 		_, _ = w.Write([]byte(baseStats + extraStats))

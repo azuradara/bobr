@@ -39,9 +39,14 @@ type Cache struct {
 	sketch *CountMinSketch
 	mu     sync.Mutex
 
-	Hits    int64
-	Misses  int64
-	Flushed int64
+	triggerCh chan struct{}
+	closeCh   chan struct{}
+	wg        sync.WaitGroup
+
+	Hits         int64
+	Misses       int64
+	Flushed      int64
+	FlushedBytes int64
 }
 
 func New(cfg config.CacheConfig) (*Cache, error) {
@@ -66,11 +71,16 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 	}
 
 	c := &Cache{
-		disk:    db,
-		blobDir: cfg.Dir,
-		maxSize: int64(maxSize),
-		sketch:  NewSketch(1024, 5),
+		disk:      db,
+		blobDir:   cfg.Dir,
+		maxSize:   int64(maxSize),
+		sketch:    NewSketch(1024, 5),
+		triggerCh: make(chan struct{}, 1),
+		closeCh:   make(chan struct{}),
 	}
+
+	c.wg.Add(1)
+	go c.watchdog()
 
 	sizeVal, err := db.Get([]byte("sys:size"), nil)
 	if err == nil {
@@ -165,65 +175,25 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 
 	c.mu.Lock()
 
-	exists := false
-
 	var oldSize int64
 
 	if val, err := c.disk.Get(keyToEntryKey(key), nil); err == nil {
 		var meta Metadata
 		if json.Unmarshal(val, &meta) == nil {
-			exists = true
 			oldSize = meta.Size
 		}
 	}
 
-	if !exists && c.curSize+size > c.maxSize {
-		victimKey, _, ok := c.getLRUVictim()
-		if ok {
-			candidateFreq := c.sketch.Estimate(key)
-
-			victimFreq := c.sketch.Estimate(victimKey)
-
-			if candidateFreq < victimFreq {
-				c.mu.Unlock()
-
-				return nil
-			}
-		}
-	}
-
-	var victims []struct {
-		key  string
-		meta Metadata
-	}
-
-	for c.curSize+size-oldSize > c.maxSize {
-		vKey, vMeta, ok := c.getLRUVictim()
-		if !ok {
-			break
-		}
-
-		err := c.deleteMeta(vKey, vMeta)
-		if err != nil {
-			c.mu.Unlock()
-
-			return err
-		}
-
-		victims = append(victims, struct {
-			key  string
-			meta Metadata
-		}{vKey, vMeta})
-	}
-
 	c.curSize += size - oldSize
+	shouldEvict := c.curSize > c.maxSize
 	c.mu.Unlock()
 
-	go func() {
-		for _, v := range victims {
-			_ = c.deleteBlob(v.key)
+	if shouldEvict {
+		select {
+		case c.triggerCh <- struct{}{}:
+		default:
 		}
-	}()
+	}
 
 	blobPath := c.getBlobPath(key)
 	err := os.MkdirAll(filepath.Dir(blobPath), 0o755)
@@ -329,7 +299,122 @@ func (c *Cache) Purge(target string) (int, error) {
 }
 
 func (c *Cache) Close() error {
+	close(c.closeCh)
+	c.wg.Wait()
+
 	return c.disk.Close()
+}
+
+func (c *Cache) watchdog() {
+	defer c.wg.Done()
+
+	for {
+		select {
+		case <-c.closeCh:
+			return
+		case <-c.triggerCh:
+			c.evictLoop()
+		}
+	}
+}
+
+func (c *Cache) evictLoop() {
+	for {
+		c.mu.Lock()
+		size := c.curSize
+		c.mu.Unlock()
+
+		if size <= c.maxSize {
+			return
+		}
+
+		candidates := c.scanCandidates(50)
+		if len(candidates) == 0 {
+			time.Sleep(100 * time.Millisecond)
+
+			return
+		}
+
+		freed := c.deleteCandidates(candidates)
+
+		if freed == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func (c *Cache) scanCandidates(limit int) []string {
+	iter := c.disk.NewIterator(util.BytesPrefix([]byte("access:")), nil)
+	defer iter.Release()
+
+	var candidates []string
+	count := 0
+
+	for iter.Next() {
+		key := string(iter.Value())
+
+		if key == "" {
+			var ts int64
+			f, _ := fmt.Sscanf(string(iter.Key()), "access:%d:%s", &ts, &key)
+			if f < 2 {
+				continue
+			}
+		}
+
+		candidates = append(candidates, key)
+		count++
+		if count >= limit {
+			break
+		}
+	}
+
+	return candidates
+}
+
+func (c *Cache) deleteCandidates(keys []string) int64 {
+	c.mu.Lock()
+
+	var freedTotal int64
+	batch := new(leveldb.Batch)
+	var blobPaths []string
+
+	for _, key := range keys {
+		if c.curSize <= c.maxSize {
+			break
+		}
+
+		blobPath := c.getBlobPath(key)
+
+		metaBytes, err := c.disk.Get(keyToEntryKey(key), nil)
+		if err != nil {
+			continue
+		}
+
+		var meta Metadata
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			continue
+		}
+
+		batch.Delete(keyToEntryKey(key))
+		batch.Delete(keyToAccessKey(meta.LastAccess, key))
+
+		c.curSize -= meta.Size
+		freedTotal += meta.Size
+		atomic.AddInt64(&c.Flushed, 1)
+		atomic.AddInt64(&c.FlushedBytes, meta.Size)
+
+		blobPaths = append(blobPaths, blobPath)
+	}
+
+	c.saveSize(batch)
+	_ = c.disk.Write(batch, nil)
+	c.mu.Unlock()
+
+	for _, path := range blobPaths {
+		_ = os.Remove(path)
+	}
+
+	return freedTotal
 }
 
 func (c *Cache) getBlobPath(key string) string {
@@ -359,34 +444,4 @@ func (c *Cache) updateAccess(key string, meta Metadata) {
 	batch.Put(newAccessKey, []byte(key))
 
 	_ = c.disk.Write(batch, nil)
-}
-
-func (c *Cache) getLRUVictim() (string, Metadata, bool) {
-	iter := c.disk.NewIterator(util.BytesPrefix([]byte("access:")), nil)
-	defer iter.Release()
-
-	if iter.First() {
-		key := string(iter.Value())
-		if key == "" {
-			var ts int64
-
-			f, _ := fmt.Sscanf(string(iter.Key()), "access:%d:%s", &ts, &key)
-			if f < 2 {
-				return "", Metadata{}, false
-			}
-		}
-
-		metaBytes, err := c.disk.Get(keyToEntryKey(key), nil)
-		if err != nil {
-			return "", Metadata{}, false
-		}
-
-		var meta Metadata
-
-		_ = json.Unmarshal(metaBytes, &meta)
-
-		return key, meta, true
-	}
-
-	return "", Metadata{}, false
 }

@@ -241,3 +241,34 @@ func TestCache_Persistence(t *testing.T) {
 
 	assert.Equal(t, int64(4), c2.curSize)
 }
+
+func TestCache_MaxSizeEnforcement(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "bobr-cache-maxsize")
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	cfg := config.CacheConfig{
+		Dir:     tmpDir + "/blob",
+		DbDir:   tmpDir + "/db",
+		MaxSize: "100B",
+	}
+
+	c, err := New(cfg)
+	assert.NoError(t, err)
+	defer func() { _ = c.Close() }()
+
+	val := []byte("1234567890")
+
+	for i := range 20 {
+		key := fmt.Sprintf("key%d", i)
+		_ = c.Set(key, val, "")
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	assert.Eventually(t, func() bool {
+		c.mu.Lock()
+		size := c.curSize
+		c.mu.Unlock()
+
+		return size <= c.maxSize
+	}, 5*time.Second, 100*time.Millisecond, "Cache size should eventually drop below limit")
+}
