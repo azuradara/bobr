@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -343,25 +344,35 @@ func (c *Cache) evictLoop() {
 	}
 }
 
-func (c *Cache) scanCandidates(limit int) []string {
+type candidate struct {
+	Key       string
+	AccessKey []byte
+}
+
+func (c *Cache) scanCandidates(limit int) []candidate {
 	iter := c.disk.NewIterator(util.BytesPrefix([]byte("access:")), nil)
 	defer iter.Release()
 
-	var candidates []string
+	var candidates []candidate
 	count := 0
 
 	for iter.Next() {
 		key := string(iter.Value())
 
+		accessKey := make([]byte, len(iter.Key()))
+		copy(accessKey, iter.Key())
+
 		if key == "" {
 			var ts int64
 			f, _ := fmt.Sscanf(string(iter.Key()), "access:%d:%s", &ts, &key)
 			if f < 2 {
+				_ = c.disk.Delete(iter.Key(), nil)
+
 				continue
 			}
 		}
 
-		candidates = append(candidates, key)
+		candidates = append(candidates, candidate{Key: key, AccessKey: accessKey})
 		count++
 		if count >= limit {
 			break
@@ -371,32 +382,44 @@ func (c *Cache) scanCandidates(limit int) []string {
 	return candidates
 }
 
-func (c *Cache) deleteCandidates(keys []string) int64 {
+func (c *Cache) deleteCandidates(candidates []candidate) int64 {
 	c.mu.Lock()
 
 	var freedTotal int64
 	batch := new(leveldb.Batch)
 	var blobPaths []string
 
-	for _, key := range keys {
+	for _, cand := range candidates {
 		if c.curSize <= c.maxSize {
 			break
 		}
 
-		blobPath := c.getBlobPath(key)
+		blobPath := c.getBlobPath(cand.Key)
 
-		metaBytes, err := c.disk.Get(keyToEntryKey(key), nil)
+		metaBytes, err := c.disk.Get(keyToEntryKey(cand.Key), nil)
 		if err != nil {
+			batch.Delete(cand.AccessKey)
+
 			continue
 		}
 
 		var meta Metadata
 		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			batch.Delete(keyToEntryKey(cand.Key))
+			batch.Delete(cand.AccessKey)
+
 			continue
 		}
 
-		batch.Delete(keyToEntryKey(key))
-		batch.Delete(keyToAccessKey(meta.LastAccess, key))
+		realAccessKey := keyToAccessKey(meta.LastAccess, cand.Key)
+		if !bytes.Equal(cand.AccessKey, realAccessKey) {
+			batch.Delete(cand.AccessKey)
+
+			continue
+		}
+
+		batch.Delete(keyToEntryKey(cand.Key))
+		batch.Delete(cand.AccessKey)
 
 		c.curSize -= meta.Size
 		freedTotal += meta.Size
