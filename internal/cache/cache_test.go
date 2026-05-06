@@ -161,17 +161,14 @@ func TestCache_LRU(t *testing.T) {
 	err = c.Set("key4", bigVal, "")
 	assert.NoError(t, err)
 
-	var evictErr error
-	assert.Eventually(t, func() bool {
-		var d io.ReadCloser
-		d, _, _, evictErr = c.Get("key1")
-		if d != nil {
-			_ = d.Close()
-		}
-		return evictErr == ErrNotFound
-	}, 2*time.Second, 10*time.Millisecond)
+	select {
+	case <-c.triggerCh:
+	default:
+	}
+	c.evictLoop()
 
-	assert.Equal(t, ErrNotFound, evictErr)
+	_, _, _, err = c.Get("key1")
+	assert.Equal(t, ErrNotFound, err)
 
 	data, _, _, err = c.Get("key0")
 	assert.NoError(t, err)
