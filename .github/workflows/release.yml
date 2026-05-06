@@ -9,19 +9,24 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version-file: go.mod
 
       - name: Install dependencies
         run: |
@@ -30,14 +35,36 @@ jobs:
 
       - name: Build
         run: |
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/azuradara/bobr/internal/cli.Version=${{ github.ref_name }}" -o bobr-linux-amd64 cmd/bobr/main.go
-          sha256sum bobr-linux-amd64 > bobr-linux-amd64.sha256
+          GOOS=linux GOARCH=${{ matrix.arch }} go build \
+            -ldflags="-s -w -X github.com/azuradara/bobr/internal/cli.Version=${{ github.ref_name }}" \
+            -o bobr-linux-${{ matrix.arch }} \
+            cmd/bobr/main.go
+          sha256sum bobr-linux-${{ matrix.arch }} > bobr-linux-${{ matrix.arch }}.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bobr-linux-${{ matrix.arch }}
+          path: |
+            bobr-linux-${{ matrix.arch }}
+            bobr-linux-${{ matrix.arch }}.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
 
       - name: Generate Changelog
-        id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          echo "Generating changelog from $PREV_TAG to ${{ github.ref_name }}"
           echo "## Changelog" > CHANGELOG.md
           echo "" >> CHANGELOG.md
           git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD >> CHANGELOG.md
@@ -49,5 +76,7 @@ jobs:
           files: |
             bobr-linux-amd64
             bobr-linux-amd64.sha256
+            bobr-linux-arm64
+            bobr-linux-arm64.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

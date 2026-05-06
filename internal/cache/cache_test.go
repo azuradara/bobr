@@ -161,12 +161,13 @@ func TestCache_LRU(t *testing.T) {
 	err = c.Set("key4", bigVal, "")
 	assert.NoError(t, err)
 
-	data, _, _, err = c.Get("key1")
-
-	if data != nil {
-		_ = data.Close()
+	select {
+	case <-c.triggerCh:
+	default:
 	}
+	c.evictLoop()
 
+	_, _, _, err = c.Get("key1")
 	assert.Equal(t, ErrNotFound, err)
 
 	data, _, _, err = c.Get("key0")
