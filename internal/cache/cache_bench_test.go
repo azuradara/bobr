@@ -49,18 +49,18 @@ func BenchmarkCache(b *testing.B) {
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			r, _, _, err := c.Get(key)
+			r, err := c.Get(key)
 			if err != nil {
 				b.Fatal(err)
 			}
-			_ = r.Close()
+			_ = r.Body.Close()
 		}
 	})
 
 	b.Run("Get_Miss", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("miss_key_%d", i)
-			_, _, _, err := c.Get(key)
+			_, err := c.Get(key)
 			if err == nil {
 				b.Fatal("expected error for missing key")
 			}
@@ -88,11 +88,11 @@ func BenchmarkCache(b *testing.B) {
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				r, _, _, err := c.Get(key)
+				r, err := c.Get(key)
 				if err != nil {
 					b.Fatal(err)
 				}
-				_ = r.Close()
+				_ = r.Body.Close()
 			}
 		})
 	})
@@ -102,7 +102,7 @@ func BenchmarkCache(b *testing.B) {
 			i := 0
 			for pb.Next() {
 				key := fmt.Sprintf("p_miss_key_%d", i)
-				_, _, _, err := c.Get(key)
+				_, err := c.Get(key)
 				if err == nil {
 					b.Fatal("expected error for missing key")
 				}

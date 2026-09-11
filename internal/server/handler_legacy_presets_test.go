@@ -1,8 +1,8 @@
 package server
 
 import (
+	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,27 +19,28 @@ type MockDriver struct {
 	files map[string][]byte
 }
 
-func (m *MockDriver) Fetch(ctx context.Context, path string) (io.ReadCloser, int64, string, error) {
-	if content, ok := m.files[path]; ok {
-		return io.NopCloser(
-				strings.NewReader(string(content)),
-			), int64(
-				len(content),
-			), "image/png", nil
+func (m *MockDriver) Fetch(_ context.Context, path string) (*storage.Object, error) {
+	content, ok := m.files[path]
+	if !ok {
+		content, ok = m.files["/"+strings.TrimLeft(path, "/")]
 	}
 
-	if !strings.HasPrefix(path, "/") {
-		if content, ok := m.files["/"+path]; ok {
-			return io.NopCloser(
-					strings.NewReader(string(content)),
-				), int64(
-					len(content),
-				), "image/png", nil
-		}
+	if !ok {
+		return nil, storage.ErrNotFound
 	}
 
-	return nil, 0, "", storage.ErrNotFound
+	return &storage.Object{
+		Body:        nopSeekCloser{bytes.NewReader(content)},
+		Size:        int64(len(content)),
+		ContentType: "image/png",
+	}, nil
 }
+
+type nopSeekCloser struct {
+	*bytes.Reader
+}
+
+func (nopSeekCloser) Close() error { return nil }
 
 func TestLegacyPresets(t *testing.T) {
 	tmpDir, _ := os.MkdirTemp("", "bobr-legacy-test")
@@ -71,7 +72,7 @@ func TestLegacyPresets(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(c, hosts)
+	h := NewHandler(c, hosts, 14400)
 
 	driver := &MockDriver{
 		files: map[string][]byte{

@@ -29,13 +29,16 @@ type Metadata struct {
 	LastAccess  time.Time `json:"last_access"`
 	Key         string    `json:"key"`
 	ContentType string    `json:"content_type"`
+	ETag        string    `json:"etag"`
+	StoredAt    time.Time `json:"stored_at"`
 }
 
 type Cache struct {
-	disk    *leveldb.DB
-	blobDir string
-	maxSize int64
-	curSize int64
+	disk          *leveldb.DB
+	blobDir       string
+	maxSize       int64
+	maxObjectSize int64
+	curSize       int64
 
 	sketch *CountMinSketch
 	mu     sync.Mutex
@@ -71,13 +74,25 @@ func New(cfg config.CacheConfig) (*Cache, error) {
 		return nil, fmt.Errorf("invalid max_size: %w", err)
 	}
 
+	maxObjectSize := uint64(maxSize)
+
+	if cfg.MaxObjectSize != "" {
+		maxObjectSize, err = humanize.ParseBytes(cfg.MaxObjectSize)
+		if err != nil {
+			_ = db.Close()
+
+			return nil, fmt.Errorf("invalid max_object_size: %w", err)
+		}
+	}
+
 	c := &Cache{
-		disk:      db,
-		blobDir:   cfg.Dir,
-		maxSize:   int64(maxSize),
-		sketch:    NewSketch(1024, 5),
-		triggerCh: make(chan struct{}, 1),
-		closeCh:   make(chan struct{}),
+		disk:          db,
+		blobDir:       cfg.Dir,
+		maxSize:       int64(maxSize),
+		maxObjectSize: int64(maxObjectSize),
+		sketch:        NewSketch(1024, 5),
+		triggerCh:     make(chan struct{}, 1),
+		closeCh:       make(chan struct{}),
 	}
 
 	c.wg.Add(1)
@@ -109,7 +124,15 @@ func (c *Cache) saveSize(batch *leveldb.Batch) {
 	batch.Put([]byte("sys:size"), []byte(strconv.FormatInt(c.curSize, 10)))
 }
 
-func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
+type Entry struct {
+	Body        io.ReadSeekCloser
+	Size        int64
+	ContentType string
+	ETag        string
+	StoredAt    time.Time
+}
+
+func (c *Cache) Get(key string) (*Entry, error) {
 	c.mu.Lock()
 	c.sketch.Add(key)
 
@@ -120,17 +143,17 @@ func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			atomic.AddInt64(&c.Misses, 1)
 
-			return nil, 0, "", ErrNotFound
+			return nil, ErrNotFound
 		}
 
-		return nil, 0, "", err
+		return nil, err
 	}
 
 	var meta Metadata
 	if err := json.Unmarshal(metaBytes, &meta); err != nil {
 		c.mu.Unlock()
 
-		return nil, 0, "", err
+		return nil, err
 	}
 
 	c.updateAccess(key, meta)
@@ -145,15 +168,21 @@ func (c *Cache) Get(key string) (io.ReadCloser, int64, string, error) {
 
 			atomic.AddInt64(&c.Misses, 1)
 
-			return nil, 0, "", ErrNotFound
+			return nil, ErrNotFound
 		}
 
-		return nil, 0, "", err
+		return nil, err
 	}
 
 	atomic.AddInt64(&c.Hits, 1)
 
-	return f, meta.Size, meta.ContentType, nil
+	return &Entry{
+		Body:        f,
+		Size:        meta.Size,
+		ContentType: meta.ContentType,
+		ETag:        meta.ETag,
+		StoredAt:    meta.StoredAt,
+	}, nil
 }
 
 func (c *Cache) cleanupStaleEntry(key string, size int64) {
@@ -168,10 +197,16 @@ func (c *Cache) cleanupStaleEntry(key string, size int64) {
 	}
 }
 
+var ErrTooLarge = errors.New("object too large")
+
+func (c *Cache) Cacheable(size int64) bool {
+	return size <= c.maxObjectSize
+}
+
 func (c *Cache) Set(key string, value []byte, contentType string) error {
 	size := int64(len(value))
-	if size > c.maxSize {
-		return errors.New("object too large")
+	if !c.Cacheable(size) {
+		return ErrTooLarge
 	}
 
 	c.mu.Lock()
@@ -218,11 +253,14 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	now := time.Now()
 	meta := Metadata{
 		Size:        size,
-		LastAccess:  time.Now(),
+		LastAccess:  now,
 		Key:         key,
 		ContentType: contentType,
+		ETag:        etagFor(value),
+		StoredAt:    now,
 	}
 	metaJSON, _ := json.Marshal(meta)
 
@@ -242,6 +280,12 @@ func (c *Cache) Set(key string, value []byte, contentType string) error {
 	return nil
 }
 
+func etagFor(value []byte) string {
+	sum := sha256.Sum256(value)
+
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
 func (c *Cache) deleteMeta(key string, meta Metadata) error {
 	batch := new(leveldb.Batch)
 	batch.Delete(keyToEntryKey(key))
@@ -258,6 +302,16 @@ func (c *Cache) deleteBlob(key string) error {
 	return os.Remove(c.getBlobPath(key))
 }
 
+func matchesPurge(key, target string) bool {
+	if strings.HasPrefix(key, target) {
+		return true
+	}
+
+	i := strings.Index(key, "/")
+
+	return i >= 0 && strings.HasPrefix(key[i:], target)
+}
+
 func (c *Cache) Purge(target string) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -272,7 +326,7 @@ func (c *Cache) Purge(target string) (int, error) {
 
 	for iter.Next() {
 		key := string(iter.Key()[6:])
-		if strings.Contains(key, target) {
+		if matchesPurge(key, target) {
 			var meta Metadata
 			if err := json.Unmarshal(iter.Value(), &meta); err == nil {
 				victims = append(victims, struct {

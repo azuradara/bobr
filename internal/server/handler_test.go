@@ -28,7 +28,7 @@ func TestHandler_CORS(t *testing.T) {
 	defer func() { _ = c.Close() }()
 
 	hosts := map[string]config.HostConfig{}
-	h := NewHandler(c, hosts)
+	h := NewHandler(c, hosts, 14400)
 
 	req := httptest.NewRequest(http.MethodOptions, "http://example.com/test", nil)
 	w := httptest.NewRecorder()

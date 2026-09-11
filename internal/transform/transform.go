@@ -94,9 +94,9 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 
 	switch imageType {
 	case bimg.JPEG, bimg.HEIF, bimg.AVIF:
-	case bimg.PNG:
+	case bimg.PNG, bimg.WEBP:
 		if IsAnimated(data) {
-			return data, "image/png", nil
+			return data, getContentType(data, imageType), nil
 		}
 	default:
 		return data, getContentType(data, imageType), nil

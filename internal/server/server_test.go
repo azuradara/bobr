@@ -49,11 +49,30 @@ func TestServer_Routes(t *testing.T) {
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
+	req = httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
 	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:5000"
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 	assert.Contains(t, w.Body.String(), "bobr_cache_hits_total")
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "8.8.8.8:5000"
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:5000"
+	req.Header.Set("X-Real-IP", "8.8.8.8")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
 }
 
 func TestServer_Middleware(t *testing.T) {
