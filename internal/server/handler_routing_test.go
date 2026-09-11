@@ -82,7 +82,7 @@ func TestHandler_selectOrigins(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHandler(nil, map[string]config.HostConfig{
 				"test.com": tt.hostCfg,
-			})
+			}, 14400)
 
 			router := h.hosts["test.com"]
 			got := h.selectOrigins(router, tt.requestPath)

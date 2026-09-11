@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,12 +42,54 @@ type TransformsConfig struct {
 	ResizePresets map[string]int `yaml:"resize_presets"`
 }
 
+type TimeoutsConfig struct {
+	Read  string `yaml:"read"`
+	Write string `yaml:"write"`
+	Idle  string `yaml:"idle"`
+}
+
+type MetricsConfig struct {
+	Allow []string `yaml:"allow"`
+}
+
 type Config struct {
-	Version string                `yaml:"version"`
-	Listen  string                `yaml:"listen"`
-	Logger  LoggerConfig          `yaml:"logger"`
-	Cache   CacheConfig           `yaml:"cache"`
-	Hosts   map[string]HostConfig `yaml:"hosts"`
+	Version  string                `yaml:"version"`
+	Listen   string                `yaml:"listen"`
+	MaxAge   string                `yaml:"max_age"`
+	Timeouts TimeoutsConfig        `yaml:"timeouts"`
+	Metrics  MetricsConfig         `yaml:"metrics"`
+	Logger   LoggerConfig          `yaml:"logger"`
+	Cache    CacheConfig           `yaml:"cache"`
+	Hosts    map[string]HostConfig `yaml:"hosts"`
+}
+
+func (t TimeoutsConfig) ReadTimeout() time.Duration {
+	return parseDuration(t.Read, 15*time.Second)
+}
+
+func (t TimeoutsConfig) WriteTimeout() time.Duration {
+	return parseDuration(t.Write, 5*time.Minute)
+}
+
+func (t TimeoutsConfig) IdleTimeout() time.Duration {
+	return parseDuration(t.Idle, 60*time.Second)
+}
+
+func parseDuration(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+
+	return d
+}
+
+func (c *Config) MaxAgeSeconds() int {
+	return int(parseDuration(c.MaxAge, 4*time.Hour).Seconds())
 }
 
 func Load(path string) (*Config, error) {

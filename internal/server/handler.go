@@ -1,7 +1,7 @@
 package server
 
 import (
-	"context"
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/azuradara/bobr/internal/cache"
 	"github.com/azuradara/bobr/internal/config"
@@ -21,6 +22,7 @@ type Handler struct {
 	cache       *cache.Cache
 	hosts       map[string]*hostRouter
 	driverCache map[string]storage.Driver
+	maxAge      int
 	mu          sync.RWMutex
 
 	BytesOut    int64
@@ -41,11 +43,12 @@ type requestContext struct {
 	effectiveTransforms config.TransformsConfig
 }
 
-func NewHandler(c *cache.Cache, hosts map[string]config.HostConfig) *Handler {
+func NewHandler(c *cache.Cache, hosts map[string]config.HostConfig, maxAge int) *Handler {
 	h := &Handler{
 		cache:       c,
 		hosts:       make(map[string]*hostRouter),
 		driverCache: make(map[string]storage.Driver),
+		maxAge:      maxAge,
 	}
 
 	for name, hostCfg := range hosts {
@@ -85,6 +88,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, OPTIONS")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+
+		return
+	}
+
 	router, ok := h.getHostRouter(w, r)
 	if !ok {
 		return
@@ -97,8 +107,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if data, size, contentType, err := h.cache.Get(reqCtx.cacheKey); err == nil {
-		h.serveCacheHit(w, data, size, contentType)
+	if entry, err := h.cache.Get(reqCtx.cacheKey); err == nil {
+		h.serveCacheHit(w, r, entry)
 
 		return
 	} else if !errors.Is(err, cache.ErrNotFound) {
@@ -184,23 +194,27 @@ func (h *Handler) resolveRequest(
 	return ctx, nil
 }
 
-func (h *Handler) serveCacheHit(
-	w http.ResponseWriter,
-	data io.ReadCloser,
-	size int64,
-	contentType string,
-) {
-	defer func() { _ = data.Close() }()
+func (h *Handler) serveCacheHit(w http.ResponseWriter, r *http.Request, entry *cache.Entry) {
+	defer func() { _ = entry.Body.Close() }()
 
 	w.Header().Set("X-Cache", "HIT")
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	h.setCommonHeaders(w, entry.ContentType, entry.ETag)
+
+	http.ServeContent(w, r, "", entry.StoredAt, entry.Body)
+	atomic.AddInt64(&h.BytesOut, entry.Size)
+}
+
+func (h *Handler) setCommonHeaders(w http.ResponseWriter, contentType, etag string) {
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(h.maxAge))
 
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
 
-	n, _ := io.Copy(w, data)
-	atomic.AddInt64(&h.BytesOut, n)
+	if etag != "" {
+		w.Header().Set("ETag", etag)
+	}
 }
 
 func (h *Handler) handleCacheMiss(
@@ -217,80 +231,143 @@ func (h *Handler) handleCacheMiss(
 	}
 
 	for i, originCfg := range origins {
-		originPath := reqCtx.effectivePath
-		if originCfg.Prefix != "" && originCfg.Prefix != "/" {
-			originPath = strings.TrimPrefix(reqCtx.effectivePath, originCfg.Prefix)
-			if !strings.HasPrefix(originPath, "/") {
-				originPath = "/" + originPath
-			}
-		}
+		last := i == len(origins)-1
 
-		driver, err := h.getDriver(originCfg)
+		obj, err := h.fetchOrigin(r, originCfg, reqCtx.effectivePath)
 		if err != nil {
-			slog.Error("failed to create driver", "err", err, "origin", originCfg.Name)
-
-			if i == len(origins)-1 {
-				http.Error(w, "Origin Error", http.StatusBadGateway)
-
-				return
+			if !last {
+				continue
 			}
 
-			continue
-		}
-
-		atomic.AddInt64(&h.OriginCalls, 1)
-
-		body, _, contentType, err := driver.Fetch(r.Context(), originPath)
-		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
-				slog.Debug("origin object not found", "path", originPath, "origin", originCfg.Name)
+				http.Error(w, "Not Found", http.StatusNotFound)
 			} else {
-				slog.Error(
-					"origin fetch failed",
-					"err",
-					err,
-					"path",
-					originPath,
-					"origin",
-					originCfg.Name,
-				)
+				http.Error(w, "Origin IO Error", http.StatusBadGateway)
 			}
-
-			if i == len(origins)-1 {
-				if errors.Is(err, storage.ErrNotFound) {
-					http.Error(w, "Not Found", http.StatusNotFound)
-				} else {
-					http.Error(w, "Origin IO Error", http.StatusBadGateway)
-				}
-
-				return
-			}
-
-			continue
-		}
-
-		defer func() { _ = body.Close() }()
-
-		dataBytes, err := io.ReadAll(body)
-		if err != nil {
-			slog.Error("failed to read origin body", "err", err, "origin", originCfg.Name)
-			http.Error(w, "Origin IO Error", http.StatusBadGateway)
 
 			return
 		}
 
-		dataBytes, contentType, size := h.processContent(
-			reqCtx.effectiveTransforms,
-			reqCtx.transformParams,
-			dataBytes,
-			contentType,
-		)
+		defer func() { _ = obj.Body.Close() }()
 
-		h.asyncCache(reqCtx.cacheKey, dataBytes, contentType)
-		h.serveResponse(w, dataBytes, size, contentType)
+		h.serveOrigin(w, r, reqCtx, obj)
 
 		return
 	}
+}
+
+func (h *Handler) fetchOrigin(
+	r *http.Request,
+	originCfg config.OriginConfig,
+	path string,
+) (*storage.Object, error) {
+	originPath := path
+	if originCfg.Prefix != "" && originCfg.Prefix != "/" {
+		originPath = strings.TrimPrefix(path, originCfg.Prefix)
+		if !strings.HasPrefix(originPath, "/") {
+			originPath = "/" + originPath
+		}
+	}
+
+	driver, err := h.getDriver(originCfg)
+	if err != nil {
+		slog.Error("failed to create driver", "err", err, "origin", originCfg.Name)
+
+		return nil, err
+	}
+
+	atomic.AddInt64(&h.OriginCalls, 1)
+
+	obj, err := driver.Fetch(r.Context(), originPath)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			slog.Debug("origin object not found", "path", originPath, "origin", originCfg.Name)
+		} else {
+			slog.Error(
+				"origin fetch failed",
+				"err", err,
+				"path", originPath,
+				"origin", originCfg.Name,
+			)
+		}
+
+		return nil, err
+	}
+
+	return obj, nil
+}
+
+// Objects that no transform will touch are streamed straight through, so a large
+// file never lands in memory. Only transformable images are buffered.
+func (h *Handler) serveOrigin(
+	w http.ResponseWriter,
+	r *http.Request,
+	reqCtx requestContext,
+	obj *storage.Object,
+) {
+	if !h.willTransform(reqCtx, obj.ContentType) {
+		w.Header().Set("X-Cache", "MISS")
+		h.setCommonHeaders(w, obj.ContentType, obj.ETag)
+
+		if h.cache.Cacheable(obj.Size) {
+			h.streamAndCache(w, r, reqCtx.cacheKey, obj)
+
+			return
+		}
+
+		http.ServeContent(w, r, "", obj.LastModified, obj.Body)
+		atomic.AddInt64(&h.BytesOut, obj.Size)
+
+		return
+	}
+
+	dataBytes, err := io.ReadAll(obj.Body)
+	if err != nil {
+		slog.Error("failed to read origin body", "err", err)
+		http.Error(w, "Origin IO Error", http.StatusBadGateway)
+
+		return
+	}
+
+	dataBytes, contentType, size := h.processContent(
+		reqCtx.effectiveTransforms,
+		reqCtx.transformParams,
+		dataBytes,
+		obj.ContentType,
+	)
+
+	h.asyncCache(reqCtx.cacheKey, dataBytes, contentType)
+	h.serveResponse(w, r, dataBytes, size, contentType)
+}
+
+func (h *Handler) streamAndCache(
+	w http.ResponseWriter,
+	r *http.Request,
+	key string,
+	obj *storage.Object,
+) {
+	dataBytes, err := io.ReadAll(obj.Body)
+	if err != nil {
+		slog.Error("failed to read origin body", "err", err)
+		http.Error(w, "Origin IO Error", http.StatusBadGateway)
+
+		return
+	}
+
+	h.asyncCache(key, dataBytes, obj.ContentType)
+
+	http.ServeContent(w, r, "", obj.LastModified, bytes.NewReader(dataBytes))
+	atomic.AddInt64(&h.BytesOut, int64(len(dataBytes)))
+}
+
+func (h *Handler) willTransform(reqCtx requestContext, contentType string) bool {
+	if !transform.IsImage(contentType) {
+		return false
+	}
+
+	t := reqCtx.effectiveTransforms
+
+	return t.Optimize || (t.Resize && !reqCtx.transformParams.Empty())
 }
 
 func (h *Handler) selectOrigins(router *hostRouter, path string) []config.OriginConfig {
@@ -351,21 +428,20 @@ func (h *Handler) asyncCache(key string, data []byte, contentType string) {
 
 func (h *Handler) serveResponse(
 	w http.ResponseWriter,
+	r *http.Request,
 	data []byte,
 	size int64,
 	contentType string,
 ) {
-	w.Header().Set("X-Cache", "MISS")
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
-	} else {
-		w.Header().Set("Content-Type", http.DetectContentType(data))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
 	}
 
-	n, _ := w.Write(data)
-	atomic.AddInt64(&h.BytesOut, int64(n))
+	w.Header().Set("X-Cache", "MISS")
+	h.setCommonHeaders(w, contentType, "")
+
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
+	atomic.AddInt64(&h.BytesOut, size)
 }
 
 func (h *Handler) getDriver(cfg config.OriginConfig) (storage.Driver, error) {
@@ -394,12 +470,4 @@ func (h *Handler) getDriver(cfg config.OriginConfig) (storage.Driver, error) {
 	h.driverCache[key] = f
 
 	return f, nil
-}
-
-func (h *Handler) Fetch(
-	ctx context.Context,
-	driver storage.Driver,
-	path string,
-) (io.ReadCloser, int64, string, error) {
-	return driver.Fetch(ctx, path)
 }
