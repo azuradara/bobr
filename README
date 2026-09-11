@@ -12,13 +12,18 @@ RUN
 
   server  -c <file>   Start server (default)
   migrate <file>      Migrate v1 config to v2
-  purge   <prefix>    Purge cache objects
+  purge   <prefix>    Purge cache objects. Matches a key prefix, with or without
+                      the host ("/static/x.png" hits every host). The cache db is
+                      single-writer, so stop the server before purging.
   version             Print version
 
 CONFIG
   See config/config.yaml. Structure:
 
   listen: :7040
+  max_age: 4h
+  timeouts: { read: 15s, write: 5m, idle: 60s }
+  metrics: { allow: [10.0.0.0/8] }
   logger: { level: debug }
   cache:  { dir: .cache, db_dir: .db, max_size: 256MB, max_object_size: 4MB }
   
@@ -37,10 +42,24 @@ CONFIG
           transforms: { optimize: false } # Override
           config: { bucket: ..., endpoint: ..., region: ..., access_key: ..., secret_key: ... }
 
+  max_age          Cache-Control max-age sent to clients. Default 4h.
+  timeouts.write   Raise it before serving large objects. Default 5m.
+  metrics.allow    CIDRs allowed to read /metrics and /_stats. Loopback is always
+                   allowed. Behind a proxy the client is taken from X-Real-IP, so
+                   a public request through nginx is matched on its real address.
+  max_object_size  Objects above it are served but never cached.
+
+ENDPOINTS
+  /metrics /_stats  Prometheus text format, restricted to metrics.allow
+  /healthz          Liveness, unrestricted
+
 TRANSFORMS (URL params)
   ?width=N    Resize to width
   ?height=N   Resize to height
   ?crop=X     Crop (center, top, bottom, left, right)
+
+  Applies to JPEG, PNG, WEBP, HEIF and AVIF. Animated images and every other type
+  are served unchanged. Range requests are served for all types.
 
 MOTIVATION
   Needed a cheap and fast alternative to paying for a CDN.

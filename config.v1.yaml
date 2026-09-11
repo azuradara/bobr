@@ -1,5 +1,13 @@
 version: "2"
 listen: :7040
+max_age: 4h
+timeouts:
+    read: 15s
+    write: 5m
+    idle: 60s
+metrics:
+    allow:
+        - 10.0.0.0/8
 logger:
     level: debug
 cache:
