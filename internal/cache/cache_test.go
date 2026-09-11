@@ -26,14 +26,14 @@ func TestCache_Stats(t *testing.T) {
 
 	defer func() { _ = c.Close() }()
 
-	_, _, _, err = c.Get("miss")
+	_, err = c.Get("miss")
 	assert.Equal(t, ErrNotFound, err)
 
 	_ = c.Set("hit", []byte("val"), "")
-	data, _, _, err := c.Get("hit")
+	data, err := c.Get("hit")
 	assert.NoError(t, err)
 
-	_ = data.Close()
+	_ = data.Body.Close()
 
 	stats := c.Stats()
 	assert.Contains(t, stats, "bobr_cache_hits_total 1")
@@ -96,15 +96,15 @@ func TestCache_Basic(t *testing.T) {
 	err = c.Set("key1", []byte("value1"), "")
 	assert.NoError(t, err)
 
-	data, _, _, err := c.Get("key1")
+	data, err := c.Get("key1")
 	assert.NoError(t, err)
 
-	val, _ := io.ReadAll(data)
-	_ = data.Close()
+	val, _ := io.ReadAll(data.Body)
+	_ = data.Body.Close()
 
 	assert.Equal(t, []byte("value1"), val)
 
-	_, _, _, err = c.Get("unknown")
+	_, err = c.Get("unknown")
 	assert.Equal(t, ErrNotFound, err)
 }
 
@@ -132,30 +132,30 @@ func TestCache_LRU(t *testing.T) {
 		time.Sleep(1 * time.Millisecond)
 	}
 
-	data, _, _, err := c.Get("key0")
+	data, err := c.Get("key0")
 	if data != nil {
-		_ = data.Close()
+		_ = data.Body.Close()
 	}
 
 	assert.NoError(t, err)
 
-	data, _, _, err = c.Get("key0")
+	data, err = c.Get("key0")
 	assert.NoError(t, err)
 
-	_ = data.Close()
+	_ = data.Body.Close()
 
 	bigVal := []byte("123456789012345678901234567890")
 
-	data, _, _, _ = c.Get("key4")
+	data, _ = c.Get("key4")
 
 	if data != nil {
-		_ = data.Close()
+		_ = data.Body.Close()
 	}
 
-	data, _, _, _ = c.Get("key4")
+	data, _ = c.Get("key4")
 
 	if data != nil {
-		_ = data.Close()
+		_ = data.Body.Close()
 	}
 
 	err = c.Set("key4", bigVal, "")
@@ -167,13 +167,13 @@ func TestCache_LRU(t *testing.T) {
 	}
 	c.evictLoop()
 
-	_, _, _, err = c.Get("key1")
+	_, err = c.Get("key1")
 	assert.Equal(t, ErrNotFound, err)
 
-	data, _, _, err = c.Get("key0")
+	data, err = c.Get("key0")
 	assert.NoError(t, err)
 
-	_ = data.Close()
+	_ = data.Body.Close()
 }
 
 func TestCache_TinyLFU_Admission(t *testing.T) {
@@ -197,8 +197,8 @@ func TestCache_TinyLFU_Admission(t *testing.T) {
 	_ = c.Set("frequent", val, "")
 
 	for range 10 {
-		if data, _, _, _ := c.Get("frequent"); data != nil {
-			_ = data.Close()
+		if data, _ := c.Get("frequent"); data != nil {
+			_ = data.Body.Close()
 		}
 	}
 
@@ -232,11 +232,11 @@ func TestCache_Persistence(t *testing.T) {
 
 	defer func() { _ = c2.Close() }()
 
-	data, _, _, err := c2.Get("persist")
+	data, err := c2.Get("persist")
 	assert.NoError(t, err)
 
-	val, _ := io.ReadAll(data)
-	_ = data.Close()
+	val, _ := io.ReadAll(data.Body)
+	_ = data.Body.Close()
 
 	assert.Equal(t, []byte("data"), val)
 
