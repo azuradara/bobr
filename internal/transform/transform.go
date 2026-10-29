@@ -138,7 +138,7 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 
 	img := bimg.NewImage(data)
 
-	size, err := img.Size()
+	meta, err := img.Metadata()
 	if err != nil {
 		return nil, "", err
 	}
@@ -160,8 +160,8 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 	}
 
 	if p.focused() {
-		w, h := size.Width, size.Height
-		if meta, err := img.Metadata(); err == nil && meta.Orientation >= 5 {
+		w, h := meta.Size.Width, meta.Size.Height
+		if meta.Orientation >= 5 {
 			w, h = h, w
 		}
 
@@ -173,7 +173,7 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 			opts.Crop = true
 			opts.Gravity = cropToGravity(p.Crop)
 		} else {
-			newW, newH := fitDimensions(size.Width, size.Height, p.Width, p.Height)
+			newW, newH := fitDimensions(meta.Size.Width, meta.Size.Height, p.Width, p.Height)
 			opts.Width = newW
 			opts.Height = newH
 		}

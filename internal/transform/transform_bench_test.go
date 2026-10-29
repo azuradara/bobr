@@ -38,6 +38,11 @@ func BenchmarkApply(b *testing.B) {
 		{"Resize_Small", Params{Width: 100, Height: 100}},
 		{"Resize_Medium", Params{Width: 500, Height: 500}},
 		{"Crop_Center", Params{Width: 500, Height: 500, Crop: CropCenter}},
+		{"Crop_Center_Wide", Params{Width: 500, Height: 250, Crop: CropCenter}},
+		{
+			"Crop_Focal_Wide",
+			Params{Width: 500, Height: 250, Crop: CropCenter, Focal: &Point{80, 20}},
+		},
 	}
 
 	for _, bm := range benchmarks {
