@@ -57,6 +57,7 @@ TRANSFORMS (URL params)
   ?width=N    Resize to width
   ?height=N   Resize to height
   ?crop=X     Crop (center, top, bottom, left, right)
+  ?focal=X,Y  Focal point in percent, centers crop=center on it (needs width and height)
 
   Applies to JPEG, PNG, WEBP, HEIF and AVIF. Animated images and every other type
   are served unchanged. Range requests are served for all types.

@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -19,10 +20,15 @@ const (
 	CropRight
 )
 
+type Point struct {
+	X, Y float64
+}
+
 type Params struct {
 	Width  int
 	Height int
 	Crop   Crop
+	Focal  *Point
 }
 
 func ParseParams(query url.Values) Params {
@@ -51,7 +57,24 @@ func ParseParams(query url.Values) Params {
 		p.Crop = CropNone
 	}
 
+	p.Focal = parseFocal(query.Get("focal"))
+
 	return p
+}
+
+func parseFocal(v string) *Point {
+	x, y, ok := strings.Cut(v, ",")
+	if !ok {
+		return nil
+	}
+
+	fx, errX := strconv.ParseFloat(x, 64)
+	fy, errY := strconv.ParseFloat(y, 64)
+	if errX != nil || errY != nil || fx < 0 || fx > 100 || fy < 0 || fy > 100 {
+		return nil
+	}
+
+	return &Point{fx, fy}
 }
 
 func (p Params) Empty() bool {
@@ -82,7 +105,18 @@ func (p Params) CacheKey() string {
 		sb.WriteString(strconv.Itoa(int(p.Crop)))
 	}
 
+	if p.focused() {
+		sb.WriteString("f")
+		sb.WriteString(strconv.FormatFloat(p.Focal.X, 'f', -1, 64))
+		sb.WriteString(",")
+		sb.WriteString(strconv.FormatFloat(p.Focal.Y, 'f', -1, 64))
+	}
+
 	return sb.String()
+}
+
+func (p Params) focused() bool {
+	return p.Crop == CropCenter && p.Focal != nil && p.Width > 0 && p.Height > 0
 }
 
 func IsImage(contentType string) bool {
@@ -104,7 +138,7 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 
 	img := bimg.NewImage(data)
 
-	size, err := img.Size()
+	meta, err := img.Metadata()
 	if err != nil {
 		return nil, "", err
 	}
@@ -125,14 +159,21 @@ func Apply(data []byte, p Params, optimize bool, lossless bool) ([]byte, string,
 		}
 	}
 
-	if !p.Empty() {
+	if p.focused() {
+		w, h := meta.Size.Width, meta.Size.Height
+		if meta.Orientation >= 5 {
+			w, h = h, w
+		}
+
+		focalCrop(&opts, w, h, p)
+	} else if !p.Empty() {
 		if p.Crop != CropNone {
 			opts.Width = p.Width
 			opts.Height = p.Height
 			opts.Crop = true
 			opts.Gravity = cropToGravity(p.Crop)
 		} else {
-			newW, newH := fitDimensions(size.Width, size.Height, p.Width, p.Height)
+			newW, newH := fitDimensions(meta.Size.Width, meta.Size.Height, p.Width, p.Height)
 			opts.Width = newW
 			opts.Height = newH
 		}
@@ -221,6 +262,34 @@ func cropToGravity(c Crop) bimg.Gravity {
 	default:
 		return bimg.GravityCentre
 	}
+}
+
+func focalCrop(o *bimg.Options, w, h int, p Params) {
+	scale := math.Max(float64(p.Width)/float64(w), float64(p.Height)/float64(h))
+	outW, outH := p.Width, p.Height
+
+	if scale > 1 {
+		outW = int(math.Round(float64(p.Width) / scale))
+		outH = int(math.Round(float64(p.Height) / scale))
+		scale = 1
+	}
+
+	o.Width = int(math.Round(float64(w) * scale))
+	o.Height = int(math.Round(float64(h) * scale))
+	o.AreaWidth = min(outW, o.Width)
+	o.AreaHeight = min(outH, o.Height)
+	o.Left = clamp(
+		int(math.Round(p.Focal.X/100*float64(o.Width)))-o.AreaWidth/2,
+		o.Width-o.AreaWidth,
+	)
+	o.Top = clamp(
+		int(math.Round(p.Focal.Y/100*float64(o.Height)))-o.AreaHeight/2,
+		o.Height-o.AreaHeight,
+	)
+}
+
+func clamp(v, hi int) int {
+	return max(0, min(v, hi))
 }
 
 func fitDimensions(origW, origH, targetW, targetH int) (int, int) {
